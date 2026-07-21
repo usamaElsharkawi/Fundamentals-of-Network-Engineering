@@ -1,68 +1,42 @@
-
 # Fundamentals of Networking
 
-## Client-Server Architecture
-
 <details>
-<summary><b>1. The Client-Server Architecture</b></summary>
+<summary><b>Client-Server Architecture</b></summary>
 
+### 1. The Client-Server Architecture
 The **client-server architecture** is a paradigm where an **always-on host (the server)** services requests from many other **initiating hosts (clients)**. 
 *   **The Server:** Typically possesses "beefy" hardware to handle expensive workloads and maintains a fixed, well-known IP address.
 *   **The Client:** Generally uses commodity hardware and performs lightweight tasks, contacting the server as needed.
 *   **Centralization:** A defining characteristic is that **clients do not communicate directly** with one another; all coordination happens through the central server.
 
-</details>
-
-<details>
-<summary><b>2. The Three-Tier Architecture</b></summary>
-
+### 2. The Three-Tier Architecture
 Considered a specialized case of the client-server model, the **three-tier architecture** physically and logically separates an application into three levels to improve scalability and security.
 *   **Presentation Tier (Frontend):** The user interface that collects data and displays results.
 *   **Application Tier (Logic/Middleware):** The "heart of the application" where business rules are implemented. 
 *   **Data Tier (Backend):** Where information is stored and managed by a DBMS.
 *   **Interaction Rule:** A key principle is that the **presentation tier cannot talk directly to the data tier**; all requests must pass through the Application Tier's APIs.
 
-</details>
-
-<details>
-<summary><b>3. Remote Procedure Call (RPC) and gRPC</b></summary>
-
+### 3. Remote Procedure Call (RPC) and gRPC
 To manage the complexity of these architectures, developers use **RPC** to allow one machine to invoke code on another as if it were a local function call.
 *   **gRPC:** A modern, high-performance RPC framework developed by Google.
 *   **Efficiency:** It operates at **Layer 7 (Application Layer)** and uses **Protocol Buffers** for efficient binary encoding, which is significantly faster than JSON.
 *   **Transport:** It is built on top of **HTTP/2**, allowing multiple concurrent calls over a single long-lived TCP connection.
 
-</details>
-
-<details>
-<summary><b>4. Scaling the Architecture</b></summary>
-
+### 4. Scaling the Architecture
 "Scaling better" in this model involves centralizing work on powerful infrastructure to handle massive traffic.
 *   **Data Centers:** Companies use hundreds of thousands of hosts in a data center to act as a single **powerful "virtual" server**.
 *   **Load Balancers:** These devices distribute traffic across internal hosts. **Layer 7 Load Balancers** are "protocol-aware," looking at application data (like HTTP headers) to route requests to specific microservices.
 *   **CDNs:** Content Distribution Networks scale capacity globally by caching content in distributed "edge" locations closer to users.
 
-</details>
-
-<details>
-<summary><b>5. Microservices and Disaggregation</b></summary>
-
+### 5. Microservices and Disaggregation
 Microservices borrowed the request-response and RPC models from client-server architecture but expanded them into **"disaggregated" functional units**. 
 *   This allows for **decoupled innovation**, where individual services (Network Functions in 5G, for example) can be updated or scaled independently without changing the whole system.
 
-</details>
-
-<details>
-<summary><b>6. Edge Computing: The Modern Trend</b></summary>
-
+### 6. Edge Computing: The Modern Trend
 **Edge computing** involves placing workloads and data processing as close to the "edge" of the network—where data is created—as possible.
 *   **The Spectrum:** It ranges from **Edge Devices** (like cars with 50 CPUs) to **Edge Servers** (on-premise racks) and the **Network Edge** (5G base stations).
 *   **Benefits:** It reduces latency for real-time apps, saves bandwidth costs, and improves security by keeping sensitive data local.
 *   **Trade-offs:** Edge environments often have **minimal runtimes** (e.g., a 1MB code limit) and can actually be **slower** if they must fetch data from a distant central database. 
-
-</details>
-<details>
-<summary><b>7. Architectural Evolution: From Client-Server to Edge Computing</b></summary>
 
 The following summary synthesizes the architectural concepts discussed, linking them together as an evolution of networking engineering designed to manage complexity, cost, and performance.
 
@@ -99,5 +73,3 @@ While centralization in data centers provides power, it introduces **latency** b
 ![Client-Server Architecture](Client-server-architecture.png)
 
 </details>
-
-
