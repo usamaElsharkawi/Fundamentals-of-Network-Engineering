@@ -130,3 +130,47 @@ While their primary layers differ, both roles must collaborate on web performanc
 ![OSI Model](OSI%20model.png)
 
 </details>
+
+<details>
+<summary><b>Host-to-Host Communication</b></summary>
+
+**Host-to-host communication** refers to the **logical communication between end systems** (hosts) provided by the network layer, allowing them to exchange information regardless of the physical distance or the number of intermediate devices between them. While the transport layer handles communication between specific processes, the network layer is responsible for moving packets from one host to another.
+
+### 1. The Addressing Infrastructure
+For two hosts to communicate, they must be identifiable through a standardized addressing scheme that functions at different layers of the protocol stack.
+
+*   **MAC Addresses (Layer 2):** Every network interface has a unique, permanent **Media Access Control (MAC)** address assigned by the manufacturer. These are used for "hop-to-hop" delivery within the same local network.
+*   **IP Addresses (Layer 3):** To enable global routability, hosts use **IP addresses**, which have a hierarchical structure (a network portion and a host portion). This hierarchy allows routers to eliminate vast numbers of unnecessary networks when determining a path.
+*   **The Domain Name System (DNS):** Because humans prefer mnemonic names (like www.google.com) over numeric IP addresses, DNS acts as a distributed database to translate hostnames into the IP addresses required for communication.
+
+### 2. The Data Journey: Encapsulation
+When a host has data to send, it passes through a process called **encapsulation**, where each layer adds its own control information.
+1.  **Application Layer:** Creates the original **message**.
+2.  **Transport Layer:** Breaks the message into chunks and adds a header to create a **segment** (TCP) or **datagram** (UDP).
+3.  **Network Layer:** Adds a header containing the source and destination IP addresses to create an **IP datagram** (or packet).
+4.  **Data Link Layer:** Encapsulates the datagram into a **frame**, adding the source and destination MAC addresses.
+5.  **Physical Layer:** Converts the frame into raw bits (electrical signals, light, or radio waves) for transmission over the medium.
+
+### 3. Direct vs. Indirect Communication
+How a host initiates communication depends on whether the destination is on its local subnet or a remote network.
+
+*   **Direct Delivery (Same Subnet):** The sending host applies a **subnet mask** to the destination IP; if it matches its own network prefix, they are on the same subnet. It then uses the **Address Resolution Protocol (ARP)** to find the destination's MAC address and sends the frame directly to that host.
+*   **Indirect Delivery (Remote Subnet):** If the destination is on a different network, the host sends the packet to its **Default Gateway** (a router). It uses ARP to find the router's MAC address and addresses the frame to the router, even though the IP datagram inside is still addressed to the final host.
+
+### 4. The Role of the Network Core (Routing)
+The path between hosts is composed of multiple links and **packet switches** (routers and link-layer switches).
+*   **Forwarding:** A router-local action where a packet arriving on an input link is moved to the appropriate output link based on its **forwarding table**.
+*   **Routing Algorithms:** These determine the end-to-end path that packets take from the source to the destination.
+*   **Longest Prefix Matching:** When a router searches its table for a destination, it uses the "longest prefix match" rule to find the most specific entry for that IP address.
+
+### 5. Practical Example: A Web Page Request
+To see these concepts linked together, consider a host requesting a web page:
+1.  **DHCP:** The host first uses DHCP to obtain its own IP address, subnet mask, and the address of its DNS server and gateway router.
+2.  **DNS:** It sends a DNS query (over UDP) to find the IP address of the web server.
+3.  **ARP:** It uses ARP to find the MAC address of its default gateway so it can send the query out of the local subnet.
+4.  **TCP Handshake:** Once it has the server's IP, it performs a **three-way handshake** (SYN, SYNACK, ACK) to establish a reliable connection.
+5.  **HTTP Request:** Finally, the host sends an **HTTP GET** message inside the established TCP connection to retrieve the page.
+
+![Host-to-Host Communication](Host%20to%20Host%20communication.png)
+
+</details>
