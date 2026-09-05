@@ -1764,6 +1764,53 @@ Bytes 4-7: Unused
 
 ---
 
+## ICMP Blocking & Security
+
+### Why Firewalls Block ICMP
+
+| Attack | How it works |
+|--------|--------------|
+| **Smurf attack** | Attacker sends ping to broadcast address with spoofed source IP → victim gets flooded with replies |
+| **Covert channel** | Data can be hidden inside ICMP packets (since it's not commonly monitored) |
+
+Some firewalls block ICMP entirely as a security measure.
+
+### The Problem
+
+Blocking ICMP breaks diagnostic tools:
+
+```
+ping 8.8.8.8 → blocked by firewall → "Request timed out"
+```
+
+But remember: **ping is just an IP packet wrapping ICMP**. There's no special "ping port" — it's just an ICMP Echo Request (Type=8, Code=0).
+
+### The Trade-off
+
+Disabling ICMP sounds secure — but it breaks legitimate functionality:
+
+```
+Breaking Path MTU Discovery (PMTUD):
+  Router needs to tell sender "your packet is too big, needs fragmentation"
+  This is done via ICMP "Fragmentation Needed" message
+  If ICMP is blocked → sender never learns the MTU limit → connection stalls or times out
+```
+
+### Best Practice
+
+| Approach | Problem |
+|----------|---------|
+| Block all ICMP | Breaks PMTUD, legitimate diagnostics |
+| Allow all ICMP | Vulnerable to Smurf, covert channels |
+| Allow specific ICMP types | Best practice |
+
+**Selective ICMP allows:**
+- Echo Reply (Type=0) — ping responses
+- Time Exceeded (Type=11) — traceroute
+- Destination Unreachable (Type=3) — PMTUD and error reporting
+
+---
+
 ## What's Next?
 
 Lecture 10 continues with: **PING** (Echo Request/Reply), **TraceRoute** (TTL-based path mapping), and capturing ICMP packets.
