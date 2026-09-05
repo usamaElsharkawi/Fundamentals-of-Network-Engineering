@@ -1689,6 +1689,81 @@ ICMP    = You yell "Hey!" across the room, anyone can hear it (host-level)
 
 ---
 
+## ICMP Packet Header Structure
+
+The ICMP header is **much simpler than IP** — only 8 bytes minimum.
+
+```
+Byte 0: Type (8 bits)
+Byte 1: Code (8 bits)
+Bytes 2-3: Checksum (16 bits)
+Bytes 4-7: Rest of Header (32 bits)
+```
+
+| Offset | Size | Field | Purpose |
+|--------|------|-------|---------|
+| 0 | 1 byte | Type | What kind of ICMP message |
+| 1 | 1 byte | Code | More specific info about the type |
+| 2-3 | 2 bytes | Checksum | Error checking (same concept as IP header checksum) |
+| 4-7 | 4 bytes | Rest of Header | Content varies by Type/Code |
+
+---
+
+### Type and Code Together
+
+```
+Type = What happened
+Code = Details about what happened
+```
+
+| Type | Name | Common Codes |
+|------|------|--------------|
+| 0 | Echo Reply | 0 (Echo reply) |
+| 3 | Destination Unreachable | 0 (Network unreachable), 1 (Host unreachable), 3 (Port unreachable) |
+| 8 | Echo Request | 0 (Echo request — ping) |
+| 11 | Time Exceeded | 0 (TTL expired), 1 (Fragment reassembly time exceeded) |
+
+**Example combinations:**
+
+```
+Type = 3, Code = 1 → "Host Unreachable"
+Type = 8, Code = 0 → "Echo Request" (ping)
+Type = 0, Code = 0 → "Echo Reply" (pong)
+```
+
+---
+
+### The Rest of Header Field
+
+Content varies by Type:
+
+**For Echo Request/Reply (ping):**
+
+```
+Bytes 4-5: Identifier (helps match request to reply)
+Bytes 6-7: Sequence Number (tracks multiple pings)
+```
+
+```
+ping 8.8.8.8
+Echo Request: Type=8, Code=0, ID=1234, Seq=1
+Echo Reply:   Type=0, Code=0, ID=1234, Seq=1
+```
+
+**For Destination Unreachable:**
+
+```
+Bytes 4-7: Unused (set to 0)
+```
+
+**For Time Exceeded:**
+
+```
+Bytes 4-7: Unused
+```
+
+---
+
 ## What's Next?
 
 Lecture 10 continues with: **PING** (Echo Request/Reply), **TraceRoute** (TTL-based path mapping), and capturing ICMP packets.
