@@ -1235,21 +1235,375 @@ Each row represents **4 bytes (32 bits)**. Data begins at byte offset 56 (448 bi
 
 ---
 
+## IPv4 Header Fields — Complete Reference
+
+### Complete Header Diagram
+
+```
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+├─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┤
+│Version│  IHL  │    DSCP   │ECN│           Total Length            │
+├────────┴───────┴───────────────────┴───────────────────────────────────┤
+│        Identification         │Flags│         Fragment Offset           │
+├─────────────────────────────┴─────┴─────────────────────────────────────┤
+│  Time to Live │   Protocol      │         Header Checksum              │
+├────────────────┴─────────────────┴─────────────────────────────────────┤
+│                         Source IP Address                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                       Destination IP Address                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                    Options (if IHL > 5)                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Version
+
+**Size:** 4 bits | **Position:** Byte 0, Bits 0-3
+
+Indicates which IP version is being used.
+
+| Value | Version |
+|-------|---------|
+| 4 | IPv4 |
+| 6 | IPv6 |
+
+When a device receives an IP packet, it reads the **first 4 bits** first to determine how to parse the rest of the header.
+
+```
+0100 = IPv4
+0110 = IPv6
+```
+
+---
+
+### IHL (Internet Header Length)
+
+**Size:** 4 bits | **Position:** Byte 0, Bits 4-7
+
+Tells the receiver how long the IP header is, so they know where the data starts.
+
+| IHL Value | Header Length | Options |
+|-----------|---------------|---------|
+| 5 | 20 bytes | None |
+| 6 | 24 bytes | 4 bytes |
+| ... | ... | ... |
+| 15 | 60 bytes | 40 bytes |
+
+Stored in **32-bit words** (4-byte chunks), so:
+
+```
+IHL = 5  →  5 × 4 bytes = 20 bytes (minimum header, no options)
+IHL = 15 → 15 × 4 bytes = 60 bytes (maximum header, with options)
+```
+
+Why in 4-byte units? 4 bits can store 0-15, but 15 bytes isn't enough for the max 60-byte header. By counting in 4-byte units, it can express up to 60 bytes.
+
+---
+
+### DSCP (Differentiated Services Code Point)
+
+**Size:** 6 bits | **Position:** Bytes 0-1, Bits 8-13
+
+**QoS (Quality of Service)** — tells routers how to prioritize this packet.
+
+| DSCP Value | Name | Use Case |
+|------------|------|----------|
+| 0 | Best Effort | Regular browsing, downloads |
+| 46 | Expedited Forwarding (EF) | VoIP, video calls — low latency |
+| 34 | AF41 | High priority video |
+| 26 | AF31 | Medium priority |
+
+When a router is congested, higher DSCP packets get processed first.
+
+**In practice:** DSCP is often ignored on the public internet. It works best in controlled environments (enterprise networks, data centers, AWS VPC with proper config).
+
+---
+
+### ECN (Explicit Congestion Notification)
+
+**Size:** 2 bits | **Position:** Bytes 0-1, Bits 14-15
+
+Allows routers to signal **congestion** without dropping packets.
+
+```
+Traditional: Router full → drop packet → sender slows down (via timeout)
+ECN:         Router full → mark packet "congested" → sender slows down proactively
+```
+
+Values:
+
+```
+00 = Not ECN capable
+01 = ECN capable (ECT)
+10 = ECN capable (ECT)
+11 = Congestion Experienced (CE)
+```
+
+Both sender and receiver must support ECN. It's negotiated at the TCP level. The benefit: no packet drops needed — the network tells endpoints about congestion **before** it becomes a problem.
+
+---
+
+### Total Length
+
+**Size:** 16 bits | **Position:** Bytes 0-1, Bits 16-31
+
+Tells the receiver the **total size of the entire IP packet** (header + data) in bytes.
+
+```
+2^16 - 1 = 65,535 bytes (maximum packet size)
+```
+
+The 16-bit field physically cannot store a number larger than 65,535.
+
+| Scenario | Total Length |
+|----------|--------------|
+| DNS response | ~50-100 bytes |
+| HTTP page request | ~500-1,500 bytes |
+| File download | Up to MTU-limited fragments |
+
+---
+
+### Identification
+
+**Size:** 16 bits | **Position:** Bytes 4-5, Bits 32-47
+
+Uniquely identifies each IP packet. Used when a packet is **fragmented** — all fragments of the same packet share the same Identification.
+
+```
+Original packet: ID = 12345
+    ↓ split into fragments
+Fragment 1: ID = 12345, Offset = 0
+Fragment 2: ID = 12345, Offset = 1480
+Fragment 3: ID = 12345, Offset = 2960
+```
+
+The receiver uses the Identification to group fragments and reassemble them into the original packet.
+
+---
+
+### Flags
+
+**Size:** 3 bits | **Position:** Bytes 4-5, Bits 48-50
+
+Three flags control fragmentation behavior:
+
+| Bit | Flag | Purpose |
+|-----|------|---------|
+| 0 | Reserved | Must be 0 (unused) |
+| 1 | DF (Don't Fragment) | 1 = Do NOT fragment this packet |
+| 2 | MF (More Fragments) | 1 = More fragments coming |
+
+```
+DF = 0 → May be fragmented if needed
+DF = 1 → Do NOT fragment — drop if exceeds MTU
+
+MF = 0 → This is the last fragment (or not fragmented)
+MF = 1 → More fragments are coming
+```
+
+---
+
+### Fragment Offset
+
+**Size:** 13 bits | **Position:** Bytes 4-5, Bits 51-63
+
+Tells the receiver **where this fragment sits** in the original packet.
+
+Measured in **8-byte chunks** (64-bit units), not bytes:
+
+```
+Offset = 185 → 185 × 8 = 1,480 bytes into the original data
+```
+
+Why 8-byte units? 13 bits can store 0-8191, but in bytes that would only cover 8KB. With 8-byte units, it covers 8191 × 8 = 65,528 bytes — enough for the max IP packet.
+
+Example:
+
+```
+Original data: 4,000 bytes
+MTU: 1,500 bytes (1,480 bytes data per fragment after header)
+
+Fragment 1: Offset = 0,     MF = 1, Data = bytes 0-1479
+Fragment 2: Offset = 185,   MF = 1, Data = bytes 1480-2959
+Fragment 3: Offset = 370,   MF = 0, Data = bytes 2960-3999
+```
+
+---
+
+### TTL (Time To Live)
+
+**Size:** 8 bits | **Position:** Byte 8, Bits 64-71
+
+**Purpose:** Prevents packets from circulating forever if they can't find their destination.
+
+How it works:
+
+```
+Packet leaves with TTL = 64
+    ↓
+Router 1: TTL = 63 (decrement by 1)
+    ↓
+Router 2: TTL = 62
+    ↓
+Router 3: TTL = 61
+    ...
+    ↓
+TTL reaches 0: Router drops the packet, sends ICMP "Time Exceeded" back to source
+```
+
+Typical initial values:
+
+| OS | Typical TTL |
+|----|-------------|
+| Linux | 64 |
+| Windows | 128 |
+| Network gear | 255 |
+
+**Practical use — traceroute:** TTL is decremented by 1 at each hop. When TTL hits 0, the router sends back an ICMP "Time Exceeded" message. By incrementing TTL from 1, traceroute maps each router along the path.
+
+---
+
+### Protocol
+
+**Size:** 8 bits | **Position:** Byte 8, Bits 72-79
+
+Tells the receiver what **transport layer protocol** is inside this IP packet.
+
+| Protocol Number | Name | Purpose |
+|----------------|------|---------|
+| 1 | ICMP | Ping, error reporting |
+| 6 | TCP | Reliable, connection-oriented |
+| 17 | UDP | Fast, connectionless |
+| 47 | GRE | VPN tunnels |
+| 50 | ESP | IPSec encryption |
+| 51 | AH | IPSec authentication |
+| 89 | OSPF | Routing protocol |
+
+```
+IP layer: "Here's a packet"
+    ↓
+Reads Protocol = 6
+    ↓
+Hands payload to TCP handler
+```
+
+---
+
+### Header Checksum
+
+**Size:** 16 bits | **Position:** Bytes 8-9, Bits 80-95
+
+**Error-checking** — verifies that the IP header arrived intact.
+
+How it works:
+
+```
+Sender:  Calculates sum of all 16-bit words in header
+         Takes ones' complement
+         Stores result in Header Checksum field
+
+Receiver: Calculates same sum
+          Compares to Header Checksum field
+          If match → header is good
+          If mismatch → header corrupted → packet dropped
+```
+
+Important: Every router that decrements TTL must **recalculate the checksum** because the header changed.
+
+What it protects:
+
+| Protected | NOT Protected |
+|-----------|---------------|
+| IP header only | Data payload (TCP/UDP have their own checksums) |
+| Bit flips | Reordered packets |
+| Corrupted header | Deliberate tampering |
+
+---
+
+### Source IP Address
+
+**Size:** 32 bits (4 bytes) | **Position:** Bytes 12-15
+
+The IP address of the **sender** of this packet. Used by the recipient to send replies back.
+
+```
+Source IP: 192.168.1.20
+```
+
+When google.com responds to your request, it uses your Source IP as its Destination IP.
+
+---
+
+### Destination IP Address
+
+**Size:** 32 bits (4 bytes) | **Position:** Bytes 16-19
+
+The IP address of the **intended recipient** of this packet. Used by every router along the path to forward the packet.
+
+```
+Destination IP: 142.250.x.x
+```
+
+Routing decisions are based on Destination IP only. Routers don't use Source IP for forwarding.
+
+---
+
+### Options
+
+**Size:** 0-40 bytes | **Position:** Bytes 20-59 (if IHL > 5)
+
+Optional field rarely used in practice. When IHL > 5, options are present.
+
+Examples:
+
+| Option | Purpose |
+|--------|---------|
+| Record Route | Track the path a packet takes |
+| Timestamp | Record time at each router |
+| Loose Source Routing | Specify routers packet must pass through |
+| Strict Source Routing | Specify exact path packet must take |
+
+In practice: Most packets have IHL = 5 (no options). Options are used for diagnostics and specialized networking.
+
+---
+
+## Layering Summary
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    IP Packet                             │
+├─────────────────────────────────────────────────────────┤
+│ Source IP │ Dest IP │ TTL │ Protocol │ Checksum │ ... │  ← IP Header (20-60 bytes)
+├─────────────────────────────────────────────────────────┤
+│                  Payload (TCP/UDP/ICMP)                  │  ← Transport Layer
+├─────────────────────────────────────────────────────────┤
+│                      Application Data                    │  ← Application Layer
+└─────────────────────────────────────────────────────────┘
+```
+
+The Protocol field bridges Layer 3 (IP) and Layer 4 (TCP/UDP).
+
+---
+
+## Key Takeaways
+
+1. **Version** tells the receiver whether this is IPv4 or IPv6
+2. **IHL** tells where the header ends and data begins
+3. **DSCP/ECN** handle quality of service and congestion signaling
+4. **Total Length** specifies the full packet size (max 65,535 bytes)
+5. **Identification + Flags + Fragment Offset** handle packet fragmentation
+6. **TTL** prevents routing loops by dropping packets that traverse too many hops
+7. **Protocol** tells the receiver which transport protocol to hand the payload to
+8. **Header Checksum** validates the IP header wasn't corrupted
+9. **Source/Destination IP** identify who sent and who should receive the packet
+
+---
+
 ## What's Next?
 
-Lecture 9 continues with detailed explanation of each **IP Packet header field**:
-
-- Version
-- IHL (Header Length)
-- DSCP / ECN
-- Total Length
-- Identification
-- Flags & Fragment Offset
-- TTL (Time To Live)
-- Protocol
-- Header Checksum
-- Source IP Address
-- Destination IP Address
-- Options
+Lecture 10: **ICMP, PING, TraceRoute** — error reporting, network diagnostics, and path mapping.
 
 
