@@ -1079,18 +1079,177 @@ send("i") → buffered, now we have "Hi" (2 bytes)
 
 ---
 
+## IPv4 Packet Size Limits
+
+### Maximum Packet Size: 65,535 Bytes
+
+The **Total Length** field in the IPv4 header is **16 bits**.
+
+```
+2^16 = 65,536 (values from 0 to 65,535)
+Max value = 65,535 bytes
+```
+
+This is the **entire packet** (header + data):
+
+```
+┌──────────────────────────────────────────────────────┐
+│               IPv4 Packet (max 65,535 bytes)          │
+├─────────────────────────┬────────────────────────────┤
+│   IP Header (20-60 B)  │      Data (up to 65,515 B)  │
+└─────────────────────────┴────────────────────────────┘
+```
+
+### Maximum Data Payload
+
+```
+65,535 bytes (total)
+- 20 bytes (minimum header)
+─────────────────────────
+65,515 bytes of actual data
+```
+
+### Why the 65,535 Limit?
+
+The 16-bit field **physically cannot store a number larger than 65,535**.
+
+```
+16 bits = can store 0 to 65,535
+If you try to make a bigger packet, the field overflows
+```
+
+---
+
+## MTU (Maximum Transmission Unit)
+
+### The Real-World Limit
+
+The IPv4 spec allows 65,535 bytes, but **MTU** is the actual limit:
+
+**MTU = the largest packet a network link can transmit without splitting it.**
+
+```
+Standard Ethernet MTU: 1,500 bytes
+```
+
+So even though IP allows packets up to 65,535 bytes, the link layer says:
+
+> "I can only carry 1,500 bytes at a time."
+
+### MTU Values by Network Type
+
+| Network Type | MTU |
+|--------------|-----|
+| Standard Ethernet | 1,500 bytes |
+| PPPoE (DSL) | 1,492 bytes |
+| Loopback (localhost) | 65,535 bytes |
+| Jumbo frames (custom) | 9,000 bytes |
+| AWS VPC | 9,000 bytes (with jumbo frames enabled) |
+
+### Fragmentation
+
+When an IP packet exceeds the MTU:
+
+```
+You want to send: 4,000 byte IP packet
+Link MTU: 1,500 bytes
+
+→ Packet gets split into 3+ fragments
+→ Each fragment ≤ 1,500 bytes
+→ Sent separately
+→ Reassembled at destination
+```
+
+Fragmentation is generally avoided because:
+- Adds processing overhead
+- If one fragment is lost, whole packet is lost
+- Older, less efficient
+
+### Custom MTU (Large Companies)
+
+Big companies (Amazon, etc.) with custom hardware may use **jumbo frames**:
+
+```
+MTU: 9,000 bytes (instead of 1,500)
+Benefits: fewer packets, less header overhead, higher throughput
+```
+
+**But** — jumbo frames only work within their private network. As soon as traffic hits the public internet, it hits the 1,500 byte MTU barrier.
+
+```
+Your Server (MTU 9,000)
+        ↓
+Internet Router (MTU 1,500)  ← fragmentation happens here
+        ↓
+Destination Server
+```
+
+### Full-Stack Perspective
+
+When setting up Docker, Kubernetes, or cloud services, MTU settings matter:
+
+```
+Docker default bridge: 1,500 bytes
+AWS VPC: 9,000 bytes (with jumbo frames enabled)
+Kubernetes pod network: Some CNI plugins use 9,000 bytes
+```
+
+If a Docker container with MTU 9,000 talks to a host with MTU 1,500, packets can be dropped or fragmented.
+
+### Summary
+
+| Concept | Value |
+|---------|-------|
+| IP max packet | 65,535 bytes |
+| Standard Ethernet MTU | 1,500 bytes |
+| Jumbo frames | 9,000 bytes |
+| Real-world max | Limited by MTU, not IP spec |
+
+**You'll never see a 65,535 byte IP packet in the real world** — the MTU limits it first. The only exception is custom internal networks at large companies with specialized hardware.
+
+---
+
+## IPv4 Header Structure
+
+The IPv4 header is a fixed structure, minimum **20 bytes** (up to 60 bytes with options).
+
+| Offset | Bits | Field |
+|--------|------|-------|
+| 0 | 0-3 | Version |
+| 0 | 4-7 | IHL (Header Length) |
+| 0 | 8-13 | DSCP |
+| 0 | 14-15 | ECN |
+| 0 | 16-31 | Total Length |
+| 4 | 32-47 | Identification |
+| 4 | 48-50 | Flags |
+| 4 | 51-63 | Fragment Offset |
+| 8 | 64-71 | Time to Live (TTL) |
+| 8 | 72-79 | Protocol |
+| 8 | 80-95 | Header Checksum |
+| 12 | 96-127 | Source IP Address |
+| 16 | 128-159 | Destination IP Address |
+| 20 | 160-191 | Options (if IHL > 5) |
+| ... | ... | Data |
+
+Each row represents **4 bytes (32 bits)**. Data begins at byte offset 56 (448 bits) after the minimum 20-byte header.
+
+---
+
 ## What's Next?
 
-Lecture 9 continues with the **IP Packet header structure** in detail:
+Lecture 9 continues with detailed explanation of each **IP Packet header field**:
 
 - Version
-- Header Length
+- IHL (Header Length)
+- DSCP / ECN
 - Total Length
+- Identification
+- Flags & Fragment Offset
 - TTL (Time To Live)
 - Protocol
 - Header Checksum
-- Flags & Fragment Offset
-- Source IP
-- Destination IP
+- Source IP Address
+- Destination IP Address
+- Options
 
 
