@@ -1913,8 +1913,87 @@ Each line shows the router's IP and 3 round-trip times (sends 3 probes per TTL).
 
 ---
 
+## ARP — Address Resolution Protocol
+
+### The Problem It Solves
+
+You know the **IP address** of a device, but to send data on a local network, you need the **MAC address**.
+
+```
+You want to send to: 192.168.1.30
+You know the IP address
+You DON'T know the MAC address
+```
+
+Without MAC address, the Ethernet frame can't be addressed — and your packet never leaves the local network.
+
+---
+
+### ARP's Job
+
+**ARP finds the MAC address that corresponds to an IP address.**
+
+```
+IP Address:  192.168.1.30
+        ↓  ARP lookup
+MAC Address: AA:BB:CC:DD:EE:FF
+```
+
+---
+
+### How It Works
+
+```
+Step 1: Your computer checks its ARP cache
+         → Already know MAC for 192.168.1.30? Use it.
+
+Step 2: If not in cache, broadcast ARP Request:
+         "Who has 192.168.1.30? Tell 192.168.1.20"
+         (broadcasts to all devices on the subnet)
+
+Step 3: Device with 192.168.1.30 replies with ARP Reply:
+         "192.168.1.30 is at AA:BB:CC:DD:EE:FF"
+
+Step 4: Your computer caches this MAC address
+         (so it doesn't ask again for a while)
+```
+
+### The ARP Table
+
+```
+# arp -a
+? (192.168.1.1) at aa:bb:cc:dd:ee:ff on en0
+? (192.168.1.30) at 11:22:33:44:55:66 on en0
+```
+
+Your computer stores IP → MAC mappings in its **ARP cache** so it doesn't broadcast every time.
+
+---
+
+### Why MAC Address Is Needed
+
+```
+Layer 2 (Ethernet): Uses MAC addresses to deliver frames on the local network
+Layer 3 (IP):        Uses IP addresses to route between networks
+```
+
+IP gets the packet to the network. ARP finds the specific device on that network so the Ethernet frame can be delivered.
+
+---
+
+### Full-Stack Perspective
+
+| Scenario | ARP relevance |
+|----------|--------------|
+| First connection to a device | ARP request sent (slight delay) |
+| Duplicate IP detection | ARP can detect conflicts |
+| Security attacks | ARP spoofing — attacker fakes MAC address |
+| Switching from IP to IP | ARP cache cleared, new ARP request needed |
+
+---
+
 ## What's Next?
 
-Lecture 10 continues with: **PING** (Echo Request/Reply), **TraceRoute** (TTL-based path mapping), and capturing ICMP packets.
+Lecture 11: **ARP** — continues with ARP packet structure and ARP attacks.
 
 
