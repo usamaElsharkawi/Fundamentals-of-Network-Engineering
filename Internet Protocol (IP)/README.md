@@ -1602,8 +1602,95 @@ The Protocol field bridges Layer 3 (IP) and Layer 4 (TCP/UDP).
 
 ---
 
+## ICMP (Internet Control Message Protocol)
+
+### What is ICMP?
+
+**ICMP = Internet Control Message Protocol**
+
+It lives in **Layer 3** (Network Layer), alongside IP. It is **encapsulated inside an IP packet** — the IP header's Protocol field is set to `1` to indicate ICMP.
+
+```
+┌────────────────────────────────────────┐
+│ ICMP Message ( encapsulated in IP )    │
+│   Protocol = 1 (ICMP)                 │
+└────────────────────────────────────────┘
+         ↓ embedded in
+┌────────────────────────────────────────┐
+│ IP Header (Protocol = 1)               │
+│   Source IP                            │
+│   Destination IP                       │
+└────────────────────────────────────────┘
+```
+
+---
+
+### ICMP vs Ports
+
+| Concept | Layer | Identifies |
+|---------|-------|------------|
+| IP Address | Layer 3 | Which **device/host** |
+| Port Number | Layer 4 | Which **application** on that device |
+
+**ICMP has no ports** — it's Layer 3. It communicates with hosts, not applications.
+
+```
+ping 192.168.1.1      ← targeting a device (IP address)
+vs
+curl 192.168.1.1:8080 ← targeting port 8080 on that device
+```
+
+---
+
+### Purpose
+
+Designed for **operational diagnostic and informational status messages**:
+
+| Message | When it happens |
+|---------|-----------------|
+| Host unreachable | Destination network/device is down |
+| Port unreachable | No application listening on that port |
+| Fragmentation needed | Packet too large, needs to be split |
+| TTL expired | Packet crossed too many routers (prevents infinite loops) |
+
+---
+
+### Operation
+
+**ICMP uses IP directly** — it doesn't use ports or have listeners like TCP/UDP.
+
+```
+ICMP Message → wrapped in IP packet → Protocol field = 1 (ICMP)
+```
+
+The OS handles ICMP messages directly. No user application needs to be running.
+
+```
+You: ping 8.8.8.8
+Target's OS: processes ICMP, sends reply
+No application needed — kernel handles it
+```
+
+---
+
+### Key Analogy
+
+```
+TCP/UDP = You knock on a door (port), someone answers (application)
+ICMP    = You yell "Hey!" across the room, anyone can hear it (host-level)
+```
+
+---
+
+### Tools That Use ICMP
+
+- **ping** — sends Echo Request, waits for Echo Reply
+- **traceroute** — uses TTL expiration to map each hop along the path
+
+---
+
 ## What's Next?
 
-Lecture 10: **ICMP, PING, TraceRoute** — error reporting, network diagnostics, and path mapping.
+Lecture 10 continues with: **PING** (Echo Request/Reply), **TraceRoute** (TTL-based path mapping), and capturing ICMP packets.
 
 
