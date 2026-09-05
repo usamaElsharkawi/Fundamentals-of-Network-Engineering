@@ -1811,6 +1811,108 @@ Breaking Path MTU Discovery (PMTUD):
 
 ---
 
+## How PING Works
+
+### The Process
+
+```
+You: ping 8.8.8.8
+
+Step 1: Your machine sends ICMP Echo Request (Type=8, Code=0)
+Step 2: 8.8.8.8 receives it
+Step 3: 8.8.8.8's OS processes it
+Step 4: 8.8.8.8 sends ICMP Echo Reply (Type=0, Code=0)
+Step 5: Your machine receives the reply
+```
+
+### Packet Flow
+
+```
+My Machine                          8.8.8.8
+    │                                    │
+    │──── ICMP Echo Request (Type=8) ────→│
+    │                                    │
+    │←─── ICMP Echo Reply (Type=0) ─────│
+    │                                    │
+```
+
+### What ping output shows
+
+```
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=117 time=10ms
+```
+
+| Field | Meaning |
+|-------|---------|
+| `64 bytes` | Size of the ICMP reply |
+| `icmp_seq` | Sequence number — tracks multiple pings |
+| `ttl=117` | Reply had TTL=117 when it left Google (started with 64 or 128, decremented by routers along the path) |
+| `time=10ms` | Round-trip time (request sent → reply received) |
+
+---
+
+## How Traceroute Works
+
+### The Problem
+
+```
+ping 8.8.8.8
+Reply from 8.8.8.8: time=10ms
+```
+
+You only see the destination — not the path in between.
+
+### The Solution: TTL Expiration
+
+Traceroute exploits the TTL field. Each router decrements TTL by 1. When TTL hits 0, the router drops the packet and sends back an **ICMP Time Exceeded** message.
+
+### Step-by-Step Process
+
+```
+My Machine                          Router A    Router B    Router C    Google
+    │                                  │           │           │           │
+    │──── TTL=1 ──────────────────────→│ (drops)   │           │           │
+    │←─── ICMP Time Exceeded (from A) │           │           │           │
+    │                                    │           │           │           │
+    │──── TTL=2 ──────────────────────────→│ (drops)  │           │           │
+    │←─── ICMP Time Exceeded (from B)   │           │           │           │
+    │                                    │           │           │           │
+    │──── TTL=3 ────────────────────────────────→│ (drops)   │           │
+    │←─── ICMP Time Exceeded (from C)   │           │           │           │
+    │                                    │           │           │           │
+    │──── TTL=4 ────────────────────────────────→│ (reaches) │           │
+    │←─── ICMP Echo Reply (from Google)  │           │           │           │
+```
+
+### What traceroute output looks like
+
+```
+traceroute to google.com, 30 hops max
+
+1:  router.local (192.168.1.1)      1ms    1ms    1ms
+2:  10.0.0.1 (isp.gateway)          5ms    4ms    5ms
+3:  * * * (router doesn't reply ICMP)
+4:  72.14.215.85 (google.edge)      10ms   9ms    11ms
+5:  142.250.x.x (google.com)        10ms   10ms   10ms
+```
+
+| Symbol | Meaning |
+|--------|---------|
+| `* * *` | Router doesn't send ICMP Time Exceeded — often blocked by firewalls |
+
+Each line shows the router's IP and 3 round-trip times (sends 3 probes per TTL).
+
+---
+
+## Key Difference
+
+| Tool | Purpose | ICMP Types Used |
+|------|---------|----------------|
+| **ping** | Test connectivity + measure latency | Echo Request (Type=8), Echo Reply (Type=0) |
+| **traceroute** | Map the path to a destination | Time Exceeded (Type=11) from each router |
+
+---
+
 ## What's Next?
 
 Lecture 10 continues with: **PING** (Echo Request/Reply), **TraceRoute** (TTL-based path mapping), and capturing ICMP packets.
