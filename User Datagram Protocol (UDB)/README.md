@@ -480,6 +480,131 @@ If the data is old by the time it arrives, it's worthless. UDP delivers it fast 
 
 ---
 
+## Multiplexing and Demultiplexing
+
+### The Problem
+
+A single host runs **many applications** at the same time:
+
+```
+Host: 192.168.1.20
+  ├── Web browser (port 52341) → sending HTTP request
+  ├── SSH client (port 22) → sending commands
+  ├── DNS resolver (port 53) → resolving google.com
+  └── Spotify (port 43768) → streaming music
+```
+
+All these applications are sending data **at the same time** over the **same network interface**. How does the OS keep them separate?
+
+---
+
+### Multiplexing (Sender Side)
+
+**Multiplexing = combining multiple data streams into one.**
+
+The transport layer takes data from multiple applications and sends it over a single network connection.
+
+```
+Browser: "Send this HTTP request"
+  ↓
+Transport layer adds: Source Port (52341), Destination Port (80)
+  ↓
+SSH: "Send this command"
+  ↓
+Transport layer adds: Source Port (22), Destination Port (22)
+  ↓
+Both are sent over the same network interface, same IP address
+```
+
+**How it works:**
+
+1. Each application gets a **unique port number**
+2. Transport layer wraps each app's data with its port number
+3. All streams are sent over the same IP address
+
+---
+
+### Demultiplexing (Receiver Side)
+
+**Demultiplexing = separating combined streams back to their original applications.**
+
+When data arrives at the destination:
+
+```
+Packet arrives at 192.168.1.20
+  ↓
+Transport layer reads: Destination Port = 53
+  ↓
+Delivers to: DNS resolver process
+  ↓
+Next packet arrives
+  ↓
+Transport layer reads: Destination Port = 52341
+  ↓
+Delivers to: Web browser process
+```
+
+**How it works:**
+
+1. Transport layer reads the **destination port** from each packet
+2. Looks up which application owns that port
+3. Delivers the data to that application
+
+---
+
+### The Port Table
+
+Your OS maintains a **port table**:
+
+```
+Port 53    → DNS resolver (listening)
+Port 80    → Web server (listening)
+Port 22    → SSH daemon (listening)
+Port 52341 → Web browser (ephemeral, temporary)
+```
+
+When a packet arrives with `Destination Port = 53`, the OS knows to deliver it to the DNS resolver.
+
+---
+
+### Analogy
+
+```
+Multiplexing = Multiple letters going into the same mailbox
+Demultiplexing = Postman sorting mail by apartment number and delivering to each recipient
+
+Mailbox = Your computer's IP address
+Apartment number = Port number
+Letters = Data packets
+```
+
+---
+
+### TCP vs UDP Multiplexing
+
+Both TCP and UDP use the same port concept:
+
+| Feature | TCP | UDP |
+|---------|-----|-----|
+| Multiplexing | Uses ports | Uses ports |
+| Demultiplexing | Uses ports | Uses ports |
+| Connection state | Tracks connections | No connections |
+| Port reuse | 4-tuple (src IP, src port, dst IP, dst port) | 2-tuple (dst IP, dst port) |
+
+**TCP uses a 4-tuple:**
+```
+(src IP, src port, dst IP, dst port) = unique connection
+```
+
+**UDP uses a 2-tuple:**
+```
+(dst IP, dst port) = destination
+```
+
+This is why UDP is simpler — it doesn't need to track connections, just ports.
+
+---
+
 ## What's Next?
 
 Lecture 15 continues with: **User Datagram Structure** (UDP header fields).
