@@ -377,6 +377,109 @@ UDP = Regular postcard
 
 ---
 
+## UDP Use Cases
+
+### 1. DNS
+
+**Why UDP?**
+
+- Single query → single response
+- Very small payload (usually < 512 bytes)
+- No need for connection overhead
+- Fast resolution is everything
+
+```
+You: "What's google.com's IP?"
+DNS: "142.250.x.x"
+Done. Why establish a TCP connection for that?
+```
+
+**But:** If the response is too large for a single UDP packet (> 512 bytes), DNS falls back to TCP.
+
+---
+
+### 2. Video Streaming
+
+**Why UDP?**
+
+- **Latency matters more than perfection**
+- A late frame is useless — better to skip it and show the next one
+- TCP retransmission would introduce buffering and stuttering
+- Slight packet loss is acceptable (you won't notice a few dropped frames)
+
+```
+TCP approach: frame lost → wait for retransmit → video stutters → bad UX
+UDP approach: frame lost → skip it → show next frame → smooth video
+```
+
+**But:** Pure UDP streaming has no recovery, so protocols like **QUIC** (HTTP/3) or **RTP** add their own lightweight reliability on top.
+
+---
+
+### 3. VoIP / Video Calls (WebRTC)
+
+**Why UDP?**
+
+- **Real-time is everything** — you can't wait for retransmission
+- 200ms delay = noticeable lag. 500ms = unusable.
+- If a packet is lost, the audio/video has already moved on
+- Human perception masks small losses
+
+```
+TCP: "You said 'hello'... wait, let me resend that packet... here it is"
+UDP: "You said 'hello'... I missed part of it... I'll fill in the gap from context"
+```
+
+**WebRTC** uses UDP (via RTP) for media, and adds just enough reliability for signaling — not for the actual audio/video.
+
+---
+
+### 4. VPN Tunnels
+
+**Why UDP?**
+
+- VPNs need to encapsulate ALL traffic (TCP, UDP, ICMP)
+- Using TCP-over-TCP causes **TCP meltdown** — two congestion control layers fighting each other
+- UDP avoids this: no congestion control on the tunnel, only on the inner connection
+
+```
+Without VPN:
+  Your TCP → Internet → Server
+
+With TCP-based VPN:
+  Your TCP → Tunnel TCP → Internet → Server
+  Two TCP layers = both try to control congestion = chaos
+
+With UDP-based VPN:
+  Your TCP → Tunnel UDP → Internet → Server
+  Only one TCP layer (your app) controls congestion = clean
+```
+
+**Most modern VPNs (WireGuard, OpenVPN) use UDP** for exactly this reason.
+
+---
+
+### Summary Table
+
+| Use Case | Why UDP? | What breaks with TCP? |
+|----------|----------|----------------------|
+| DNS | Small, fast, single request/response | Connection overhead for tiny queries |
+| Video streaming | Latency > perfection | Retransmission causes stuttering |
+| VoIP/WebRTC | Real-time, human perception masks loss | Buffering from retransmission |
+| VPN | Avoid TCP-over-TCP meltdown | Two congestion control layers |
+
+---
+
+### The Common Thread
+
+All these use cases share the same principle:
+
+> **Speed and freshness matter more than guaranteed delivery.**
+
+If the data is old by the time it arrives, it's worthless. UDP delivers it fast — if it arrives at all.
+
+---
+
 ## What's Next?
 
 Lecture 15 continues with: **User Datagram Structure** (UDP header fields).
