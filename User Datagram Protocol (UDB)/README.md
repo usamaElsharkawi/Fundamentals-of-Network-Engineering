@@ -685,8 +685,108 @@ Same concept as IP header checksum — validates the UDP header wasn't corrupted
 
 ---
 
+## UDP Pros & Cons
+
+### Pros (Advantages)
+
+| Advantage | Why it matters |
+|-----------|----------------|
+| **Fast** | No connection setup, no handshake overhead |
+| **Low latency** | Send data immediately, no waiting for ACKs |
+| **Scalable** | Server handles millions of clients without tracking state |
+| **Simple** | No connection management logic needed |
+| **Small header** | Only 8 bytes vs TCP's 20+ bytes |
+| **No congestion control** | Doesn't slow down when network is busy |
+| **Supports broadcasting/multicast** | Can send to multiple recipients at once |
+
+---
+
+### Cons (Disadvantages)
+
+| Disadvantage | Why it matters |
+|--------------|----------------|
+| **Unreliable** | No guarantee delivery — packets can be lost |
+| **Unordered** | Packets can arrive out of order |
+| **No retransmission** | Lost packets stay lost |
+| **No flow control** | Fast sender can overwhelm slow receiver |
+| **No congestion control** | Can contribute to network congestion |
+| **No error recovery** | Application must handle all error cases |
+
+---
+
+### When to Use UDP
+
+**Use UDP when:**
+
+| Scenario | Example |
+|----------|---------|
+| Speed matters more than perfection | Video streaming, VoIP |
+| Small, frequent messages | DNS queries, IoT sensors |
+| Real-time communication | Gaming, live video |
+| Broadcasting/multicast | DNS discovery, streaming |
+| Avoiding TCP overhead | VPN tunnels (TCP-over-TCP problem) |
+
+---
+
+### When to Avoid UDP
+
+**Avoid UDP when:**
+
+| Scenario | Example |
+|----------|---------|
+| Data must arrive reliably | File transfer, email |
+| Order matters | Database transactions |
+| Large data transfers | Software downloads |
+| No built-in error recovery | Financial transactions |
+
+---
+
+### The Decision Framework
+
+```
+                    ┌─────────────────────────────┐
+                    │  Does data need to arrive?   │
+                    └──────────────┬──────────────┘
+                                   │
+                         Yes ───────┴─────── No
+                         │                    │
+                         ▼                    ▼
+              ┌─────────────────┐   ┌─────────────────┐
+              │  Use TCP        │   │  Consider UDP   │
+              │  (reliable)     │   │  (fast)         │
+              └─────────────────┘   └─────────────────┘
+```
+
+---
+
+### Real-World Examples
+
+| Protocol | Uses | Why |
+|----------|------|-----|
+| **DNS** | UDP (usually) | Small, fast, single query/response |
+| **HTTP/1.1** | TCP | Reliable web pages |
+| **HTTP/3** | UDP (QUIC) | Fast web with built-in reliability |
+| **VoIP** | UDP (RTP) | Real-time audio/video |
+| **SSH** | TCP | Reliable shell access |
+| **WebRTC** | UDP (RTP) | Real-time video calls |
+
+---
+
+### Summary
+
+| Aspect | UDP | TCP |
+|--------|-----|-----|
+| Speed | Fast | Slower |
+| Reliability | Unreliable | Reliable |
+| Ordering | Unordered | Ordered |
+| Connection | None | 3-way handshake |
+| Header size | 8 bytes | 20+ bytes |
+| Use case | Speed-critical | Reliability-critical |
+
+---
+
 ## What's Next?
 
-Lecture 17: **UDP Pros & Cons** — when to use UDP and when to avoid it.
+Lecture 18: **UDP Server with JavaScript using NodeJS** — practical implementation.
 
 </details>
