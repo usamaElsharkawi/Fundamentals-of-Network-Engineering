@@ -605,8 +605,88 @@ This is why UDP is simpler — it doesn't need to track connections, just ports.
 
 ---
 
+## UDP Datagram Structure
+
+### UDP Header
+
+The UDP header is only **8 bytes** — much smaller than IP's 20-byte minimum.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    UDP Header (8 bytes)                  │
+├────────────────────┬────────────────────────────────────┤
+│  Source Port       │  Destination Port                  │
+│  (16 bits)         │  (16 bits)                         │
+├────────────────────┴────────────────────────────────────┤
+│  Length             │  Checksum                          │
+│  (16 bits)          │  (16 bits)                         │
+└──────────────────────┴──────────────────────────────────┘
+```
+
+| Field | Size | Purpose |
+|-------|------|---------|
+| Source Port | 16 bits (2 bytes) | Which application sent this |
+| Destination Port | 16 bits (2 bytes) | Which application should receive this |
+| Length | 16 bits (2 bytes) | Total size of UDP datagram (header + data) |
+| Checksum | 16 bits (2 bytes) | Error checking |
+
+---
+
+### How UDP Sits Inside IP
+
+The entire UDP datagram (header + payload) becomes the **data portion** of the IP packet:
+
+```
+┌────────────────────────────────────────┐
+│ IP Header (Protocol = 17 for UDP)      │
+├────────────────────────────────────────┤
+│ UDP Header (8 bytes)                   │
+│   Source Port | Destination Port        │
+│   Length      | Checksum                │
+├────────────────────────────────────────┤
+│ UDP Payload (your actual data)         │
+└────────────────────────────────────────┘
+```
+
+---
+
+### Port Numbers Are 16 Bits
+
+Valid port range: **0 to 65,535**
+
+| Port Range | Purpose |
+|------------|---------|
+| 0-1023 | Well-known ports (DNS=53, HTTP=80, HTTPS=443) |
+| 1024-49151 | Registered ports |
+| 49152-65535 | Ephemeral ports (temporary, client-side) |
+
+---
+
+### The Length Field
+
+```
+Length = UDP header (8 bytes) + Data payload
+```
+
+Example:
+```
+Data = 100 bytes
+UDP header = 8 bytes
+Length field = 108 bytes
+```
+
+This tells the receiver where the UDP datagram ends.
+
+---
+
+### The Checksum Field
+
+Same concept as IP header checksum — validates the UDP header wasn't corrupted. Unlike IP, UDP checksum also covers part of the IP header (pseudo-header) for extra validation.
+
+---
+
 ## What's Next?
 
-Lecture 15 continues with: **User Datagram Structure** (UDP header fields).
+Lecture 17: **UDP Pros & Cons** — when to use UDP and when to avoid it.
 
 </details>
