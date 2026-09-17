@@ -635,7 +635,382 @@ Lecture 22: **TCP Segment** — the detailed structure of a TCP segment.
 
 ## TCP Segment
 
-<!-- Lecture 22 notes will be added here -->
+### Definition
+A **TCP Segment** is the unit of data that TCP sends over the network. It's the TCP layer's version of a "packet."
+
+**Terminology hierarchy:**
+
+```
+Application:    Message / Data / Byte stream
+TCP Layer:      Segment (TCP Header + Data)
+IP Layer:       Packet / Datagram (IP Header + Segment)
+Layer 2:        Frame (Ethernet Header + Packet + FCS)
+Layer 1:        Bits on the wire
+```
+
+Each layer wraps the layer above with its own header:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Application Data (your message)                     │
+├─────────────────────────────────────────────────────┤
+│ TCP Header (20-60 bytes) + Data = TCP Segment     │  Layer 4
+├─────────────────────────────────────────────────────┤
+│ IP Header (20-60 bytes) + Segment = IP Packet     │  Layer 3
+├─────────────────────────────────────────────────────┤
+│ Ethernet Header + IP Packet + FCS = Frame         │  Layer 2
+├─────────────────────────────────────────────────────┤
+│ Bits on the wire                                    │  Layer 1
+└─────────────────────────────────────────────────────┘
+```
+
+**Key concept:** TCP is a **byte stream** protocol — it does NOT preserve message boundaries.
+
+```
+App: send("Hello")
+App: send("World")
+
+TCP might deliver:
+  "HelloWor"  ← segment 1
+  "ld"        ← segment 2
+
+Or any other split. Your app must handle framing.
+```
+
+---
+
+### TCP Segment Structure
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    TCP Segment                            │
+│                                                           │
+│  ┌─────────────────────────────────────┐                │
+│  │         TCP Header (20-60 bytes)    │                │
+│  └─────────────────────────────────────┘                │
+│  ┌─────────────────────────────────────┐                │
+│  │         TCP Data (Payload)          │                │
+│  │    Your application's byte stream   │                │
+│  └─────────────────────────────────────┘                │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Header Fields — Deep Dive
+
+#### Source Port (2 bytes)
+Port number of the **sending** application. Receiver uses it to know where to send replies.
+
+```
+Client app on port 52341 sends:
+  Source Port = 52341
+```
+
+#### Destination Port (2 bytes)
+Port number of the **receiving** application.
+
+```
+Sending to web server:
+  Destination Port = 80 (or 443 for HTTPS)
+```
+
+Together with Source Port, these identify the connection (part of the 4-tuple).
+
+#### Sequence Number (4 bytes)
+The **most important field for reliability**. Identifies the position of the first byte of data in this segment within the overall byte stream.
+
+```
+Segment 1: Seq = 0    → Bytes 0-499 (500 bytes)
+Segment 2: Seq = 500  → Bytes 500-999
+Segment 3: Seq = 1000 → Bytes 1000-1499
+```
+
+**Used for:** Reordering out-of-order segments, detecting missing segments, knowing what to retransmit.
+
+**ISN (Initial Sequence Number):** Randomly chosen at connection start (prevents prediction attacks).
+
+#### Acknowledgment Number (4 bytes)
+Tells the sender: "I have received all bytes up to this number, send me the next one."
+
+```
+Server received bytes 0-499:
+  ACK = 500 → "I have everything up to 500, send byte 500 next"
+```
+
+**Cumulative ACK:** One ACK can acknowledge many segments (everything before the number).
+
+#### Data Offset / Header Length (4 bits)
+Tells receiver where the header ends and data begins. Since Options field is variable-length.
+
+```
+Data Offset = 5  → Header = 5 × 4 = 20 bytes (no options)
+Data Offset = 15 → Header = 15 × 4 = 60 bytes (maximum)
+```
+
+**Why in 4-byte units?** 4 bits stores 0-15, and 15 × 4 = 60 bytes — covers the maximum header.
+
+#### Flags (6 main control bits)
+
+| Flag | Full Name | Purpose | When used |
+|------|-----------|---------|-----------|
+| **URG** | Urgent | "This segment has urgent data" | Urgent data must skip queue |
+| **ACK** | Acknowledgment | "The ACK number is valid" | Almost always (after handshake) |
+| **PSH** | Push | "Deliver to app immediately" | App needs data now |
+| **RST** | Reset | "Abort the connection" | Error, invalid connection |
+| **SYN** | Synchronize | "Let's establish a connection" | Connection initiation |
+| **FIN** | Finish | "I'm done sending, close" | Connection teardown |
+
+**Flag combinations:**
+
+```
+[SYN=1, ACK=0]  → Connection request
+[SYN=1, ACK=1]  → Connection accepted
+[SYN=0, ACK=1]  → Regular data acknowledgment
+[FIN=1, ACK=1]  → Closing connection
+[RST=1]           → Connection reset/abort
+```
+
+**PSH flag — Push:** Without PSH, TCP may buffer small writes and batch them. With PSH, data is pushed to the receiving application immediately.
+
+**RST flag — Connection Killer:**
+
+```
+RST = 1 means: "Something is wrong, abort immediately"
+
+Common causes:
+  → Connecting to a port with no app listening
+  → Corrupted segment that can't be recovered
+  → Security firewall rejecting connection
+  → App crashed on server side
+```
+
+#### Window Size (2 bytes)
+**Flow control** — tells sender how many bytes the receiver is willing to accept.
+
+```
+Server says: Window = 65535
+Meaning: "I can receive 65,535 bytes before I need you to pause"
+
+When buffer fills: Window = 0 → "Stop sending"
+```
+
+**Window Scaling (option):** 2-byte window maxes at 65,535. With scaling, up to **1 GB**.
+
+```
+Window = 65535 × Scale Factor (e.g., 128) = ~16 MB
+```
+
+#### Checksum (2 bytes)
+Error detection for TCP header + data + pseudo-header (IP source/dest + protocol + TCP length).
+
+```
+Sender: Calculates checksum → stores in segment
+Receiver: Recalculates → compares
+  Match → process it
+  Mismatch → drop it (no ACK → sender retransmits)
+```
+
+#### Urgent Pointer (2 bytes)
+Used with URG flag. Points to the byte **after** the last urgent byte. Rarely used in modern systems.
+
+#### Options (0-40 bytes)
+Variable-length extensions:
+
+| Option | Size | Purpose |
+|--------|------|---------|
+| **MSS** | ~2 bytes | Largest payload per segment (usually 1460) |
+| **Window Scaling** | ~3 bytes | Multiply window beyond 65535 |
+| **Timestamps** | ~10 bytes | RTT measurement, PAWS protection |
+| **SACK Permitted** | ~2 bytes | "I accept selective retransmission" |
+| **NOP** | 1 byte | No-operation (padding) |
+| **EOL** | 1 byte | End-of-options-list (padding) |
+
+**MSS — Max Segment Size:**
+
+```
+MTU = 1500 (Ethernet)
+IP Header = 20 bytes
+TCP Header = 20 bytes
+MSS = MTU - IP Header - TCP Header = 1460 bytes
+```
+
+---
+
+### How Segments Are Formed
+
+When app calls `send()`:
+
+```
+App: send("Hello World, this is a test message")  (50 bytes)
+  ↓
+TCP checks:
+  ├── Is there enough data? (depends on MSS = 1460)
+  ├── Is receiver's window big enough?
+  ├── Should I batch more data or send now?
+  └── Should I set PSH flag?
+
+If data ≤ MSS:
+  → Create segment: Header + data
+  → Seq = current sequence number
+  → Send it
+
+If data > MSS:
+  → Split into multiple segments:
+    Segment 1: Seq = 0,     1460 bytes
+    Segment 2: Seq = 1460,  remaining bytes
+```
+
+**Nagle's Algorithm:** Buffers small writes and sends them together to reduce overhead (covered in IP section).
+
+---
+
+### How Segments Are Received — Reassembly
+
+Segments arrive potentially out of order:
+
+```
+Segment 3: Seq = 2920  → buffered (missing 1460-2919)
+Segment 1: Seq = 0     → delivered! → ACK = 1460
+Segment 2: Seq = 1460  → delivered! → ACK = 2920
+Segment 3: Seq = 2920  → now delivered → ACK = 4380
+```
+
+**Out-of-order handling:**
+
+```
+Expected: Seq = 1460
+Received: Seq = 2920 (out of order!)
+
+Action:
+  → Buffer segment 2920
+  → Send ACK = 1460 (still waiting for 1460)
+  → When Seq = 1460 arrives → deliver both buffered segments
+```
+
+**Duplicate ACKs → Fast Retransmit:** After 3 duplicate ACKs, sender retransmits without waiting for a timeout.
+
+---
+
+### Segment Sizing — MSS, MTU, Relationship
+
+```
+Physical link limit:  MTU (e.g., 1500 for Ethernet)
+IP overhead:          IP Header (20 bytes minimum)
+TCP overhead:         TCP Header (20 bytes minimum)
+Available for data:   MSS = MTU - IP Header - TCP Header = 1460 bytes
+```
+
+**If data exceeds MSS:**
+
+```
+App sends 5000 bytes:
+  Segment 1: 1460 bytes data → 1500 bytes total (with headers)
+  Segment 2: 1460 bytes data → 1500 bytes total
+  Segment 3: 1460 bytes data → 1500 bytes total
+  Segment 4: 540 bytes data  → 580 bytes total
+```
+
+**If IP packet exceeds MTU:**
+
+```
+DF flag NOT set → IP fragments the packet → receiver reassembles
+DF flag SET → IP drops packet → ICMP "Fragmentation Needed" → sender reduces size
+```
+
+This is why **Path MTU Discovery** exists.
+
+---
+
+### Segment vs Packet vs Frame
+
+| Term | Layer | What it is |
+|------|-------|------------|
+| **Segment** | Layer 4 (TCP) | TCP Header + Data |
+| **Packet** | Layer 3 (IP) | IP Header + Segment |
+| **Datagram** | Layer 3 (IP/UDP) | Header + Data (connectionless) |
+| **Frame** | Layer 2 (Ethernet) | Ethernet Header + Packet + FCS |
+
+Same data, different names at different layers.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Layer 4: TCP Segment                                    │
+│   TCP Header + TCP Data                                 │
+├────────────────────────────────────────────────────────┤
+│ Layer 3: IP Packet                                      │
+│   IP Header + TCP Segment                               │
+├────────────────────────────────────────────────────────┤
+│ Layer 2: Ethernet Frame                                 │
+│   Ethernet Header + IP Packet + FCS                     │
+├────────────────────────────────────────────────────────┤
+│ Layer 1: Bits                                             │
+│   010110101101010101...                                 │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Practical Impact for Full-Stack Engineers
+
+| Concept | What you experience |
+|---------|---------------------|
+| **Byte stream** | TCP doesn't preserve message boundaries — you need framing |
+| **MSS / MTU** | Large messages split into segments automatically |
+| **Out-of-order** | TCP handles reordering — you get data in order |
+| **Segmentation** | `send(5000 bytes)` might result in 4 segments — invisible to you |
+| **PSH flag** | Affects latency — small messages might be delayed without it |
+| **Checksum** | Corrupted segments silently dropped and retransmitted |
+| **Window size** | Controls throughput — small window = slow transfer |
+
+**Message framing in Node.js:**
+
+```javascript
+// TCP doesn't know where your message ends — you MUST add framing
+
+// Length-prefixed framing:
+const msg = Buffer.from("Hello World");
+const packet = Buffer.alloc(4 + msg.length);
+packet.writeUInt32BE(msg.length, 0);  // First 4 bytes = length
+msg.copy(packet, 4);                   // Then the data
+socket.write(packet);
+
+// On receiver:
+socket.on('data', (chunk) => {
+  // Read length from first 4 bytes
+  // Wait for full message
+  // Process it
+});
+```
+
+---
+
+### Summary
+
+```
+TCP Segment = TCP Header (20-60 bytes) + TCP Data (up to MSS bytes)
+
+Header tells receiver:
+  → Where is this in the stream? (Seq #)
+  → What have you received? (ACK #)
+  → How much can you take? (Window)
+  → What do I need from you? (Flags)
+  → Is this valid? (Checksum)
+  → Are there extensions? (Options)
+
+Data is your application's byte stream — raw, unframed, ordered.
+```
+
+---
+
+### What's Next?
+Lecture 23: **Flow Control**
+
+---
+
+## Flow Control
+
+<!-- Lecture 23 notes will be added here -->
 
 ---
 
