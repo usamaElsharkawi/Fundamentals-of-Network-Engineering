@@ -1014,12 +1014,6 @@ Lecture 23: **Flow Control**
 
 ---
 
-## Flow Control
-
-<!-- Lecture 23 notes will be added here -->
-
----
-
 ## Congestion Control
 
 <!-- Lecture 24 notes will be added here -->
@@ -1046,7 +1040,343 @@ Lecture 23: **Flow Control**
 
 ## TCP Pros and Cons
 
-<!-- Lecture 28 notes will be added here -->
+### Pros (Advantages)
+
+#### 1. Reliable Delivery
+Every byte sent is tracked. If a segment is lost, TCP retransmits it automatically.
+
+```
+Sender: sends segment with Seq = 100
+Receiver: doesn't get it
+Sender: no ACK for Seq = 100 → retransmits
+Receiver: gets it → sends ACK
+```
+
+**Why it matters:** You never have to build your own retry logic. TCP handles it at the transport layer.
+
+**Full-Stack impact:** Every HTTP request, every database query, every API call — all rely on this.
+
+---
+
+#### 2. Ordered Delivery
+TCP uses sequence numbers to reorder out-of-order segments. The application always receives data in the exact order it was sent.
+
+```
+Send:    "Hello" → "World" → "!"
+Network: "World" arrives first (out of order)
+TCP:     Reorders → "Hello" → "World" → "!"
+App:     Receives in correct order
+```
+
+**Why it matters:** Without ordering, files would be corrupted, JSON responses would be broken, HTML pages would not render.
+
+---
+
+#### 3. Flow Control
+TCP uses a **sliding window** mechanism. The receiver tells the sender how much data it can handle.
+
+```
+Receiver: Window = 65535 → "Send me up to 65535 bytes"
+Receiver buffer fills → Window = 0 → "Stop, I'm full"
+Receiver processes data → Window opens → "Send more"
+```
+
+**Why it matters:** A fast sender can't overwhelm a slow receiver.
+
+**Full-Stack impact:** When your database is under load and slows down, TCP automatically reduces the send rate from your app.
+
+---
+
+#### 4. Congestion Control
+TCP monitors the **network** and adjusts its sending rate to avoid contributing to congestion.
+
+```
+Network is fast → increase sending rate (Slow Start)
+Network is busy → slow down (Congestion Avoidance)
+Network is congested → drastically reduce rate (Multiplicative Decrease)
+```
+
+**Why it matters:** If everyone sent at maximum speed all the time, the internet would collapse.
+
+**Full-Stack impact:** During traffic spikes, TCP automatically backs off. Your app doesn't overwhelm the network.
+
+---
+
+#### 5. Connection-Oriented (Stateful)
+The 3-way handshake establishes a verified connection before data flows. Both sides know who they're talking to and the connection is alive.
+
+**Why it matters:** You can manage connections — close them gracefully, detect when they're dead, pool and reuse them.
+
+**Full-Stack impact:** Connection pooling, keep-alive, WebSocket persistence — all built on this.
+
+---
+
+#### 6. Error Detection (Checksum)
+Every segment has a checksum. The receiver validates it. Corrupted segments are silently dropped, triggering retransmission.
+
+```
+Sender: Calculates checksum
+Receiver: Recalculates → compares
+  Match → accept
+  Mismatch → drop → no ACK → sender retransmits
+```
+
+**Why it matters:** Network corruption happens (interference, router bugs, memory errors). TCP catches it automatically.
+
+---
+
+#### 7. Multiplexing and Demultiplexing
+TCP uses port numbers to multiplex multiple connections over a single IP address and demultiplex incoming data to the correct application.
+
+```
+Host: 192.168.1.20
+  Port 80 → Web server
+  Port 22 → SSH
+  Port 3000 → Node.js app
+  Port 5432 → PostgreSQL
+```
+
+**Why it matters:** Multiple services run simultaneously on one machine without interfering.
+
+---
+
+#### 8. Wide Window Size (with Scaling)
+With Window Scaling option, TCP can use windows up to **1 GB** (instead of 65,535 bytes).
+
+```
+Standard: Window = 65535 bytes = 64 KB
+Scaled:   Window = 65535 × 128 = 8 MB (or more)
+```
+
+**Why it matters:** On high-speed, high-latency networks, a 64 KB window would bottleneck throughput.
+
+**Full-Stack impact:** When your server communicates with a database across continents, window scaling keeps the pipe full.
+
+---
+
+### Cons (Disadvantages)
+
+#### 1. Header Overhead
+TCP header is **20-60 bytes** vs UDP's **8 bytes**.
+
+```
+TCP:  20-60 bytes header
+UDP:  8 bytes header
+TCP is 2.5x to 7.5x more header overhead per segment.
+```
+
+**When it hurts:** Small messages with large headers. Each DNS query (often < 100 bytes) wastes significant space on headers.
+
+---
+
+#### 2. Connection Setup Cost — 3-Way Handshake
+Every new connection requires 1 RTT before any data is sent.
+
+```
+First connection:
+  1 RTT (TCP handshake) + 1-2 RTT (TLS) + 1 RTT (HTTP) = 3-4 RTT
+
+  At 100ms RTT: 300-400ms before first byte
+```
+
+**When it hurts:** Short-lived connections, APIs that open a new connection per request.
+
+**Solution:** Connection pooling, keep-alive, HTTP/2 multiplexing.
+
+---
+
+#### 3. Head-of-Line Blocking
+If one segment is lost, ALL subsequent segments wait — even if they arrived fine.
+
+```
+Segment 1: LOST
+Segment 2: Arrived fine → BLOCKED (waiting for Seq 1)
+Segment 3: Arrived fine → BLOCKED
+Segment 4: Arrived fine → BLOCKED
+
+All stuck until segment 1 is retransmitted.
+```
+
+**When it hurts:** HTTP/2 multiplexing over TCP. One slow stream blocks all other streams. This was a major reason HTTP/3 moved to QUIC/UDP.
+
+**Full-Stack impact:** If your HTTP/2 connection has one slow request, all other requests on that connection stall.
+
+---
+
+#### 4. Stateful = Memory Cost
+Every connection consumes memory on both sides.
+
+```
+Per connection: ~4KB-64KB
+10,000 connections: ~160 MB - 1 GB
+100,000 connections: ~1.6 GB - 10 GB
+```
+
+**When it hurts:** High-concurrency systems (chat apps with millions of users, real-time gaming).
+
+**Solution:** Load balancers, connection limits, stateless architectures.
+
+---
+
+#### 5. Slower Than UDP
+Every reliability feature adds latency:
+
+```
+TCP:  Data → [handshake] → [wait for ACK] → [retransmit if lost] → [reorder] → [flow control] → delivered
+UDP:  Data → send → done
+```
+
+**When it hurts:** Real-time applications where latency matters more than perfection. Voice calls, video streaming, gaming, IoT sensors.
+
+---
+
+#### 6. No Broadcasting or Multicasting
+TCP is **point-to-point** — one sender, one receiver. Cannot:
+- Send to all devices on a network (broadcast)
+- Send to a group of devices (multicast)
+
+**When it hurts:** Service discovery, network monitoring, stock tickers, live event streaming.
+
+**UDP alternative:** UDP supports broadcast and multicast natively.
+
+---
+
+#### 7. Complex to Implement at Scale
+Managing thousands of TCP connections requires:
+- Connection pooling
+- Timeout management
+- Keep-alive configuration
+- Load balancing (sticky sessions)
+- Graceful shutdown handling
+- File descriptor limits
+
+**When it hurts:** Large-scale distributed systems. Each adds operational complexity.
+
+---
+
+### TCP vs UDP — Side-by-Side
+
+| Feature | TCP | UDP |
+|---------|-----|-----|
+| **Reliability** | Guaranteed | Not guaranteed |
+| **Ordering** | Yes | No |
+| **Connection** | 3-way handshake | None |
+| **Flow control** | Yes | No |
+| **Congestion control** | Yes | No |
+| **Header size** | 20-60 bytes | 8 bytes |
+| **Speed** | Slower | Faster |
+| **Broadcast/Multicast** | No | Yes |
+| **State** | Stateful | Stateless |
+| **Overhead** | High | Low |
+| **Use when** | Data must arrive | Speed matters |
+
+---
+
+### Decision Framework
+
+```
+                    ┌──────────────────────────┐
+                    │  Does data MUST arrive?  │
+                    └────────────┬─────────────┘
+                                 │
+                        Yes ─────┴───── No
+                         │                 │
+                         ▼                 ▼
+              ┌─────────────────┐  ┌─────────────────┐
+              │  Use TCP        │  │  Consider UDP   │
+              │  (reliable)     │  │  (fast)         │
+              └─────────────────┘  └─────────────────┘
+```
+
+### Use TCP When:
+
+| Scenario | Why TCP | Example |
+|----------|---------|---------|
+| Data must arrive completely | Every byte matters | File transfer, email |
+| Order matters | Sequence must be preserved | Database transactions |
+| Commands must execute correctly | No corruption | SSH, Telnet |
+| Web pages must load fully | Incomplete = broken | HTTP/1.1, HTTP/2 |
+| API responses must be reliable | Missing data = broken app | REST APIs, GraphQL |
+| Transactions must be atomic | Partial = corruption | Financial operations |
+
+### Use UDP When:
+
+| Scenario | Why UDP | Example |
+|----------|---------|---------|
+| Speed matters more | Latency > perfection | Video streaming, VoIP |
+| Old data is useless | Fresh data is everything | Gaming position updates |
+| Single query/response | No need for connection | DNS queries |
+| Broadcasting needed | One-to-many | Service discovery |
+| Avoid TCP overhead | TCP overhead wasteful | VPN tunnels |
+| Application has own reliability | Custom retry logic | QUIC (HTTP/3) |
+
+---
+
+### Real-World Protocol Choices
+
+| Protocol | Transport | Why |
+|----------|-----------|-----|
+| HTTP/1.1 | TCP | Reliable web pages |
+| HTTP/2 | TCP | Multiplexing over reliable connection |
+| HTTP/3 | UDP (QUIC) | Avoid head-of-line blocking |
+| DNS | UDP (usually) | Small, fast, single query/response |
+| SSH | TCP | Reliable command execution |
+| FTP | TCP | File transfer must be complete |
+| SMTP (email) | TCP | Email must arrive |
+| VoIP (RTP) | UDP | Real-time audio |
+| Video streaming | UDP | Drop frames, don't wait |
+| Online gaming | UDP | Position updates — old data useless |
+| DHCP | UDP | Discovery before having an IP |
+
+---
+
+### The Core Trade-off
+
+> **TCP guarantees delivery at the cost of speed. UDP guarantees speed at the cost of delivery.**
+
+---
+
+### Full-Stack Engineer's Cheat Sheet
+
+```
+Building a REST API?          → TCP (HTTP over TCP)
+Building a chat app?          → TCP (WebSocket over TCP) for messages
+                                → UDP for typing indicators
+Building a video call?        → UDP (WebRTC/RTP)
+Building a game?              → UDP (position updates)
+Building a file transfer?     → TCP (FTP, HTTP)
+Building a DNS resolver?      → UDP (fallback to TCP for large responses)
+Building a VPN?               → UDP (avoid TCP-over-TCP)
+Building a database driver?   → TCP (PostgreSQL, MySQL)
+```
+
+---
+
+### Summary at a Glance
+
+**Pros:**
+1. Reliable delivery — automatic retransmission
+2. Ordered delivery — sequence numbers
+3. Flow control — receiver-driven rate
+4. Congestion control — network-friendly
+5. Connection-oriented — manageable state
+6. Error detection — checksum
+7. Multiplexing — port-based delivery
+8. Wide windows — high throughput on fast networks
+
+**Cons:**
+1. Header overhead — 20-60 bytes vs 8
+2. Handshake cost — 1 RTT before data
+3. Head-of-line blocking — one loss stalls all
+4. Memory cost — state per connection
+5. Slower — every feature adds latency
+6. No broadcast/multicast — point-to-point only
+7. Complex at scale — pooling, limits, timeouts
+
+---
+
+### What's Next?
+Lecture 29: **Sockets, Connections and Kernel Queues**
 
 ---
 
