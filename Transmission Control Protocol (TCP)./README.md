@@ -484,6 +484,150 @@ Every TCP use case shares ONE trait: **the data MUST arrive reliably and in orde
 
 ---
 
+### TCP Connection
+
+A TCP connection is a **logical, stateful relationship** between two applications on different hosts. It's not a physical wire — it's a **contract** both sides agree to follow.
+
+**Key facts:**
+- Between **processes**, not hosts (a host can have many connections)
+- Identified by a **4-tuple**: `(src IP, src port, dst IP, dst port)`
+- **Stateful** — both sides store information
+- Has a **lifecycle**: born (handshake), lives (data transfer), dies (teardown)
+
+**4-Tuple — How Connections Are Identified:**
+
+```
+Connection 1: (192.168.1.20:52341, 10.0.2.10:80)    → Browser to API
+Connection 2: (192.168.1.20:52342, 10.0.2.10:80)    → Another tab to same API
+Connection 3: (192.168.1.20:52343, 10.0.2.10:443)   → Browser to HTTPS
+Connection 4: (192.168.1.20:52344, 10.0.2.20:5432)  → App to database
+```
+
+Without source port, the server couldn't tell which app each response belongs to.
+
+---
+
+#### Connection Establishment — The 3-Way Handshake
+
+The connection is **born** here. Both sides must agree before any data flows.
+
+```
+Client                    Server
+  │                          │
+  │──── SYN (Seq=X) ──────→│
+  │     Flags: [SYN=1, ACK=0]  "I want to connect, my seq# is X"
+  │                          │
+  │←─── SYN-ACK (Seq=Y, Ack=X+1) ─│
+  │     Flags: [SYN=1, ACK=1]  "I accept, my seq# is Y"
+  │                          │
+  │──── ACK (Seq=X+1, Ack=Y+1) →│
+  │     Flags: [ACK=1]         "Confirmed, let's start"
+  │                          │
+  │    ← Connection ESTABLISHED →
+```
+
+**Why 3 steps and not 2?** With only 2 steps, if the SYN-ACK is lost, the client never knows the server agreed. The server holds resources for a ghost connection. The 3rd step (ACK) guarantees **both sides know** the connection is live.
+
+**Sequence numbers are random** for security — predictable seq numbers enable TCP sequence prediction attacks.
+
+---
+
+#### Connection State — What Both Sides Store
+
+**Server's state for (Client:52341, Server:80):**
+
+```
+  ├── Client IP, Client Port, Server Port
+  ├── Client Seq# (last received)
+  ├── Server Seq# (current)
+  ├── Window Size (how much client can receive)
+  ├── Connection State: ESTABLISHED
+  ├── Send Buffer / Receive Buffer
+  ├── Retransmission Timer
+  ├── Keep-Alive Timer
+  └── Congestion Window
+```
+
+**Memory cost per connection:** ~4KB-64KB
+
+```
+1,000 connections    =  16 MB
+10,000 connections   = 160 MB
+100,000 connections  = 1.6 GB
+1,000,000 connections = 16 GB (before any data flows!)
+```
+
+This is why servers have `max_connections` limits and connection pooling is critical.
+
+---
+
+#### Connection Teardown — The 4-Way Handshake
+
+Both sides must agree to close (TCP is full-duplex — each direction closes independently):
+
+```
+Client → FIN → Server     "I'm done sending"
+Client ← ACK ← Server     "Got it"
+Client ← FIN ← Server     "I'm done too"
+Client → ACK → Server     "Goodbye"
+```
+
+---
+
+#### TIME_WAIT State
+
+After the client sends the final ACK, it waits for **2×MSL** (Maximum Segment Lifetime, typically 30-120 seconds).
+
+**Why wait?**
+1. **Ensure the final ACK arrives** — if lost, server retransmits FIN, client must be there to respond
+2. **Prevent old duplicate packets** from confusing new connections using the same 4-tuple
+
+**Practical impact:** Opening/closing many connections rapidly can exhaust ports. Solution: connection pooling or `SO_REUSEADDR`.
+
+---
+
+#### Half-Open Connection (Zombie)
+
+One side crashes, the other doesn't know — server keeps sending data to a dead client, wasting resources.
+
+**Detection — Keep-Alive:** After silence period, server sends probe. No response → connection closed.
+
+---
+
+#### Connection Lifecycle
+
+```
+CLOSED → SYN_SENT → SYN_RCVD → ESTABLISHED → FIN_WAIT_1 → FIN_WAIT_2
+                                                          → CLOSE_WAIT
+ESTABLISHED → CLOSING → TIME_WAIT → CLOSED
+ESTABLISHED → LAST_ACK → CLOSED
+```
+
+**Most common states:**
+
+| State | When | What's happening |
+|-------|------|-----------------|
+| **ESTABLISHED** | Data flowing | Both sides actively communicating |
+| **TIME_WAIT** | After client closes | Waiting 2×MSL before fully closing |
+| **CLOSE_WAIT** | Server received FIN | Server waiting app to close too |
+| **FIN_WAIT_1** | Client sent FIN | Client waiting ACK or server FIN |
+| **CLOSED** | Final state | Connection fully gone |
+
+---
+
+#### Practical Impact for Full-Stack Engineers
+
+| Concept | What you experience |
+|---------|---------------------|
+| 3-way handshake | First request slow (1 RTT overhead) |
+| Connection limits | Server has `max_connections` (Nginx: 1024 default) |
+| TIME_WAIT | Can exhaust ports with many short-lived connections |
+| Keep-alive | HTTP/1.1 default, reuses connections |
+| Half-open | Zombie connections waste server memory |
+| Full-duplex | WebSocket works — both sides can send anytime |
+
+---
+
 ### What's Next?
 Lecture 22: **TCP Segment** — the detailed structure of a TCP segment.
 
