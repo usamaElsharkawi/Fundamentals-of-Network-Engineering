@@ -304,6 +304,186 @@ TCP = Transmission Control Protocol
 
 ---
 
+### TCP Use Cases
+
+#### 1. Reliable Communication (e.g., Chat Application)
+Every message must arrive. TCP guarantees no message loss.
+
+```
+You: "Hey, are you there?"
+    ↓ TCP: seq=100, ACK mechanism
+Server: "Yes, I'm here"
+    ↓ TCP: seq=200, ACK mechanism
+```
+
+**Modern apps use a hybrid approach:**
+- **Text messages:** TCP (WebSocket over TCP) — every message must arrive
+- **Typing indicators:** Often UDP — disappearing is fine
+- **Voice/video calls:** UDP — latency matters more than perfection
+- **File transfers:** TCP — every byte must be exact
+
+**Full-Stack insight:** Socket.IO uses WebSocket (TCP) with HTTP long-polling fallback.
+
+---
+
+#### 2. Remote Shell — SSH
+Command-line access over networks. Every character must arrive correctly.
+
+```
+Your laptop ──── SSH (TCP, Port 22) ──── Server
+```
+
+If TCP didn't guarantee delivery:
+```
+You type: "rm -rf /important/data"
+If "i" is lost: "rm -rf /mportant/data" ← disaster
+```
+
+| Protocol | Transport | Why |
+|----------|-----------|-----|
+| SSH | TCP | Reliable command execution |
+| RDP (Windows) | TCP | Reliable screen + input |
+| VNC | TCP | Reliable frame buffer sync |
+| Telnet | TCP | Legacy, unencrypted |
+
+---
+
+#### 3. Database Connection — PostgreSQL, MySQL
+Reliable queries and transaction streaming.
+
+```
+Your App ──── TCP ──── PostgreSQL (Port 5432)
+```
+
+Why TCP for databases:
+- Queries must execute correctly — lost query = missing data
+- Transactions must be atomic — partial = corruption
+- Result sets must be complete — missing rows = wrong answers
+
+```
+BEGIN TRANSACTION;
+  UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+  UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+COMMIT;
+```
+
+If the second UPDATE is lost → $100 disappears. TCP prevents this.
+
+**Connection pooling** (PgBouncer, ProxySQL) manages TCP connections so your app doesn't create a new handshake for every query.
+
+---
+
+#### 4. Web Communication — HTTP over TCP
+All web traffic (HTML, CSS, JS, API calls) rides on TCP.
+
+```
+Browser ──── HTTP ──── TCP ──── IP ──── Server
+```
+
+Why HTTP needs TCP:
+- HTML must arrive completely — missing `<script>` = broken page
+- CSS must be complete — missing rules = broken layout
+- API responses must be reliable — missing JSON = broken app
+
+**The handshake cost:**
+```
+First request to new server:
+  1. TCP 3-way handshake (1 RTT)
+  2. TLS handshake if HTTPS (1-2 RTT)
+  3. HTTP request → response (1 RTT)
+  Total: 3-4 RTT before first byte
+
+  At 50ms RTT: 150-200ms before any content
+```
+
+This is why:
+- **HTTP/1.1 Keep-Alive:** Reuse TCP connection for multiple requests
+- **HTTP/2 Multiplexing:** Multiple requests over one TCP connection
+- **HTTP/3 QUIC:** Built on UDP to avoid head-of-line blocking
+
+---
+
+#### 5. HTTP/3 — Built on QUIC which is Built on UDP
+
+```
+HTTP/1.1 and HTTP/2:
+  HTTP → TCP → IP → Network
+
+HTTP/3:
+  HTTP → QUIC → UDP → IP → Network
+```
+
+**Why HTTP/3 left TCP — Head-of-Line Blocking:**
+
+```
+TCP:  Packet 1 lost → ALL subsequent packets wait
+      Even though packets 2, 3, 4 arrived fine
+      They're stuck waiting for packet 1
+
+HTTP/2 over TCP:
+  Request A (stream 1) → packet 1 LOST
+  Request B (stream 2) → packet 1 arrived fine
+  Request B is BLOCKED because TCP waits for stream 1
+```
+
+**QUIC solves this:**
+
+```
+QUIC over UDP:
+  Request A (stream 1) → packet 1 LOST
+  Request B (stream 2) → packet 1 arrived → processed immediately
+  Only stream 1 waits, stream 2 flows freely
+```
+
+**Trade-off:**
+```
+TCP:  Reliable but head-of-line blocking
+QUIC: Reliable, independent streams, no blocking
+      Includes TLS encryption by default
+      Faster handshakes (0-RTT in some cases)
+```
+
+---
+
+#### 6. Bidirectional Communication — Full-Duplex
+TCP supports full-duplex natively — both sides send and receive simultaneously.
+
+```
+Client ←→ Server
+  ↑          ↑
+  Sends      Sends
+  Receives   Receives
+```
+
+**Examples of bidirectional TCP communication:**
+
+| Application | How it uses bidirectional TCP |
+|-------------|-------------------------------|
+| WebSocket | Persistent connection, both sides push anytime |
+| SSH | You type commands, server sends output — simultaneously |
+| Database | App sends queries, DB sends results — ongoing |
+| Chat | Either side can message anytime |
+
+**Full-Stack insight:** WebSockets (Socket.IO, `ws` library) use TCP's full-duplex. The connection stays open, either side sends data at any time. Foundation of real-time notifications, live dashboards, collaborative editing, multiplayer games.
+
+---
+
+#### Pattern Across All Use Cases
+
+Every TCP use case shares ONE trait: **the data MUST arrive reliably and in order.**
+
+| Use Case | Why TCP? |
+|----------|----------|
+| Chat | Messages can't be lost |
+| SSH | Commands can't be corrupted |
+| Database | Transactions can't be partial |
+| Web (HTTP/1.1/2) | Pages can't be incomplete |
+| Bidirectional | Both sides need reliable, simultaneous flow |
+
+**The exception:** HTTP/3 moved to QUIC/UDP for performance (head-of-line blocking). Still uses reliable delivery — just implements its own on top of UDP.
+
+---
+
 ### What's Next?
 Lecture 22: **TCP Segment** — the detailed structure of a TCP segment.
 
