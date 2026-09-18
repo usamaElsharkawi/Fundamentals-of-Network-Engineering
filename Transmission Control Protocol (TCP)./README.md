@@ -638,13 +638,23 @@ Lecture 22: **TCP Segment** — the detailed structure of a TCP segment.
 ### Definition
 A **TCP Segment** is the unit of data that TCP sends over the network. It's the TCP layer's version of a "packet."
 
+**Precise formula:**
+
+```
+TCP Segment = TCP Header (20-60 bytes) + Application Data (serialized payload)
+```
+
+The **Application Data** is whatever your application produced after serialization at Layer 6/7 — HTTP request, JSON body, raw bytes from `socket.write()`, database query, binary file chunk, etc. **TCP does not interpret this data in any way.** It only numbers the bytes, checks their integrity, and delivers them in order.
+
 **Terminology hierarchy:**
 
 ```
 Application:    Message / Data / Byte stream
-TCP Layer:      Segment (TCP Header + Data)
-IP Layer:       Packet / Datagram (IP Header + Segment)
-Layer 2:        Frame (Ethernet Header + Packet + FCS)
+    ↓ serialization (encoding, formatting)
+Layer 6/7:      Serialized bytes (payload)
+TCP Layer:      Segment = Header (20-60 bytes) + Serialized bytes
+IP Layer:       Packet = IP Header (20-60 bytes) + Segment
+Layer 2:        Frame = Ethernet Header (14B) + Packet + FCS (4B)
 Layer 1:        Bits on the wire
 ```
 
@@ -652,7 +662,7 @@ Each layer wraps the layer above with its own header:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ Application Data (your message)                     │
+│ Application Data (your serialized message)          │
 ├─────────────────────────────────────────────────────┤
 │ TCP Header (20-60 bytes) + Data = TCP Segment     │  Layer 4
 ├─────────────────────────────────────────────────────┤
@@ -670,12 +680,34 @@ Each layer wraps the layer above with its own header:
 App: send("Hello")
 App: send("World")
 
+TCP sees: a single byte stream "HelloWorld"
 TCP might deliver:
-  "HelloWor"  ← segment 1
-  "ld"        ← segment 2
+  "HelloWor"  ← segment 1 (Seq=0, 9 bytes)
+  "ld"        ← segment 2 (Seq=9, 2 bytes)
 
 Or any other split. Your app must handle framing.
 ```
+
+**Why this matters:** TCP has no idea that "Hello" and "World" were two separate `send()` calls. It only knows byte offsets (Seq=0, Seq=9). If your protocol relies on message boundaries (e.g., one `read()` = one message), **you must add framing yourself** — length prefix, delimiter, or fixed-size messages.
+
+---
+
+### What is the Payload? — Real-World Examples
+
+The payload inside a TCP Segment depends entirely on what the application is doing:
+
+| App Activity | Serialized Payload Inside Segment |
+|---|---|
+| HTTP request | `GET /api HTTP/1.1\r\nHost:...\r\n\r\n` |
+| WebSocket message | `{"type":"chat","text":"hi"}` |
+| Database query | `SELECT * FROM users WHERE id=1` |
+| File transfer | Raw bytes of the file chunk |
+| Custom binary protocol | Your own binary format |
+
+**TCP doesn't care what the payload is.** It treats everything as a byte stream. A segment carrying an HTTP request and a segment carrying a JPEG image are processed identically by TCP — same Seq#, same ACK, same checksum, same window logic.
+
+This is both TCP's power and its limitation: TCP is **content-agnostic**. It provides reliable, ordered delivery regardless of what's inside, but it can't optimize for specific content types.
+
 
 ---
 
@@ -684,16 +716,38 @@ Or any other split. Your app must handle framing.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    TCP Segment                            │
-│                                                           │
+│                                                               │
 │  ┌─────────────────────────────────────┐                │
-│  │         TCP Header (20-60 bytes)    │                │
+│  │         TCP Header (20-60 bytes)      │                │
+│  │  SrcPort, DstPort, Seq#, ACK#,      │                │
+│  │  Flags, Window, Checksum, Options    │                │
 │  └─────────────────────────────────────┘                │
 │  ┌─────────────────────────────────────┐                │
-│  │         TCP Data (Payload)          │                │
-│  │    Your application's byte stream   │                │
+│  │         Application Data              │                │
+│  │    Serialized by application          │                │
+│  │    (HTTP, JSON, binary, query...)     │                │
+│  │    TCP treats as raw byte stream      │                │
 │  └─────────────────────────────────────┘                │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**The data inside is NOT "raw" — it's been through the application's serialization process.** TCP receives it as a byte stream and doesn't interpret it.
+
+---
+
+### Data Offset — How Header Size is Communicated
+
+Since the Options field is variable-length, the receiver needs to know exactly where the header ends and data begins. The **Data Offset** field (4 bits) answers this:
+
+```
+Data Offset = Header Size ÷ 4
+
+Data Offset = 5  → Header = 5 × 4 = 20 bytes (no options — minimum)
+Data Offset = 6  → Header = 6 × 4 = 24 bytes (e.g., MSS option)
+Data Offset = 15 → Header = 15 × 4 = 60 bytes (maximum)
+```
+
+**Why in 4-byte units?** 4 bits stores values 0-15, and 15 × 4 = 60 bytes — covers the maximum possible header. This encoding is compact and covers all cases.
 
 ---
 
