@@ -5,10 +5,30 @@
 
 ### Lectures
 
-- [ ] 33. Networking Protocols Introduction (3min)
-- [ ] 34. DNS (39min)
-- [ ] 35. TLS (27min)
-- [ ] 36. HTTPS, TLS, Keys and Certificates (1hr 2min)
+- [ ] 33. Networking Protocols Introduction (3min) — **pending**
+- [x] 34. DNS (39min)
+- [x] 35. TLS (27min) — Units 1-6 documented, Unit 5 (Ephemeral DH) pending
+- [ ] 36. HTTPS, TLS, Keys and Certificates (1hr 2min) — **will revisit later**
+
+---
+
+### Section Summary
+
+```
+Section 6: Overview of Popular Networking Protocols
+
+  Lecture 33: Networking Protocols Introduction — pending
+  Lecture 34: DNS ✓
+    → Hierarchy, Records, Resolution, Caching, Security, Full-Stack use cases
+  Lecture 35: TLS ✓
+    → Unit 1: Plaintext Risk
+    → Unit 2: Symmetric vs Asymmetric Encryption
+    → Unit 3: RSA & Forward Secrecy Flaw
+    → Unit 4: Diffie-Hellman Math
+    → Unit 5: Ephemeral DH — pending (will revisit)
+    → Unit 6: Hybrid Encryption
+  Lecture 36: HTTPS, TLS, Keys and Certificates — will revisit later
+```
 
 ---
 
@@ -433,16 +453,18 @@ TLS = Transport Layer Security
 ---
 
 ### What's Next?
-Lecture 36: **HTTPS, TLS, Keys and Certificates**
+Lecture 36: **HTTPS, TLS, Keys and Certificates** — will revisit later
 
 ---
 
 ## HTTPS, TLS, Keys and Certificates
 
-<!-- Lecture 36 notes will be added here -->
+<!-- Will revisit later -->
 
 ---
 
 ### What's Next?
+
+Section 6 complete — Lecture 33 & 36 pending revisit.
 
 </details>
