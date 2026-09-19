@@ -1064,13 +1064,191 @@ Lecture 23: **Flow Control**
 
 ## Flow Control
 
-<!-- Lecture 23 notes will be added here -->
+### Definition
+Flow control prevents the **sender** from overwhelming the **receiver**. It is **receiver-driven**.
+
+### Mechanism — Window Size
+The receiver advertises available buffer space via the **Window Size** field in the TCP header. The sender can send at most that many bytes before pausing.
+
+```
+Receiver buffer:
+  Total: 65,535 bytes
+  Used:  30,000 bytes
+  Available: 35,535 bytes
+
+  → Receiver says: Window = 35,535
+  → Sender can send up to 35,535 bytes
+```
+
+### Three States
+
+| State | Window | Meaning |
+|---|---|---|
+| **Normal** | > 0 | "Send me this much data" |
+| **Full** | 0 | "STOP. My buffer is full." |
+| **Recovering** | Increasing | "I'm processing data, come back" |
+
+### How It Works Dynamically
+
+```
+1. Receiver buffer has space → Window = N → Sender sends
+2. Receiver buffer fills up  → Window = 0 → Sender STOPS
+3. Sender sends probe         → Receiver checks buffer
+4. Buffer has space           → Window = M → Sender resumes
+5. Cycle continues...
+```
+
+### Flow Control vs Congestion Control
+
+| | Flow Control | Congestion Control |
+|---|---|---|
+| **Protects** | Receiver | Network |
+| **Driven by** | Receiver's buffer | Network conditions |
+| **Mechanism** | Window Size field | cwnd (congestion window) |
+| **Algorithm** | Simple advertise/don't | AIMD (Additive Increase, Multiplicative Decrease) |
+
+### Practical Impact
+
+| Scenario | What Flow Control Does |
+|---|---|
+| **Slow database** | TCP automatically reduces send rate from your app |
+| **Buffer overflow prevented** | Without Window = 0, receiver buffer would overflow |
+| **Backpressure** | Your `socket.write()` may block if receiver can't keep up |
+| **WebSocket streaming** | Window controls how much data can be in-flight |
+
+### Summary
+
+> **Flow control prevents the sender from drowning the receiver — the receiver sets the pace using the Window Size field.**
 
 ---
 
 ## Congestion Control
 
-<!-- Lecture 24 notes will be added here -->
+### Definition
+Congestion control prevents the **sender** from overwhelming the **network**. It is **network-driven**.
+
+### The Core Signal: Packet Loss = Congestion
+
+```
+If a packet is lost → the network was congested → slow down
+```
+
+Two ways TCP detects loss:
+1. **Timeout** — no ACK received within retransmission timeout (RTO)
+2. **3 Duplicate ACKs** — receiver keeps saying "I'm still waiting for Seq X"
+
+### Two Windows
+
+```
+Effective Window = min(cwnd, rwnd)
+
+cwnd = Congestion Window (network-driven, TCP algorithm)
+rwnd = Receiver Window (receiver-driven, buffer space)
+```
+
+| Window | Controlled By | Purpose |
+|---|---|---|
+| **cwnd** | Sender (TCP algorithm) | Don't overwhelm the NETWORK |
+| **rwnd** | Receiver (buffer space) | Don't overwhelm the RECEIVER |
+
+### The Algorithm — Four Phases
+
+**Phase 1: Slow Start**
+```
+cwnd starts at 1 (or 10 on modern Linux)
+Every ACK → cwnd += 1
+Result: cwnd doubles every RTT (exponential growth)
+Purpose: Find available bandwidth quickly and conservatively
+```
+
+**Phase 2: Congestion Avoidance**
+```
+When cwnd ≥ ssthresh:
+  Every RTT → cwnd += 1 (linear growth)
+Purpose: Probe gently — avoid overwhelming the network
+```
+
+**Phase 3: Multiplicative Decrease (Loss Detected)**
+```
+On loss:
+  ssthresh = cwnd / 2
+  cwnd = 1 (timeout) or cwnd = ssthresh + 3 (3 dup ACKs)
+  → Return to Slow Start or Fast Recovery
+```
+
+**Phase 4: Fast Retransmit & Fast Recovery**
+```
+3 Duplicate ACKs:
+  1. Fast Retransmit: Immediately resend missing segment (no timeout wait)
+  2. Fast Recovery: ssthresh = cwnd/2, cwnd = ssthresh + 3, skip Slow Start
+
+Timeout (more severe):
+  → Full Slow Start from cwnd = 1
+```
+
+### AIMD — Additive Increase, Multiplicative Decrease
+
+```
+Additive Increase:  cwnd += 1 per RTT (grow slowly when things are good)
+Multiplicative Decrease: cwnd = cwnd/2 (cut fast when problems occur)
+
+This creates the sawtooth pattern that keeps the network stable.
+
+Without AIMD: Everyone sends max → routers overflow → collapse → repeat
+With AIMD: Gentle growth → some congestion → those cut back → stable equilibrium
+```
+
+### Visual — cwnd Growth Over Time
+
+```
+cwnd
+  │
+  │                              /\
+  │                             /  \
+  │                            /    \
+  │                    /\    /      \
+  │                   /  \  /        \
+  │                  /    \/          \
+  │         /\    /                  \
+  │        /  \  /                    \
+  │       /    \/                      \
+  │      /                               \
+  │     /                                 \
+  │    /                                   \
+  │   /                                     \
+  │  /                                       \
+  │ /                                         \
+  │/                                           \
+  └──────────────────────────────────────────────── time
+       ↑     ↑         ↑              ↑
+    Slow   Cong.    Loss          Loss
+    Start  Avoid.  (timeout)     (3 dup ACKs)
+```
+
+### Practical Impact
+
+| Scenario | What Congestion Control Does For You |
+|---|---|
+| **API spike (1000 req/s)** | TCP automatically backs off — no app-level rate limiting needed |
+| **Cross-region DB call** | Slow Start means first few requests are slow — connection pooling avoids this |
+| **Video streaming** | Adjusts throughput in real-time during congestion |
+| **WebSocket under load** | TCP reduces send rate when network congested |
+| **Cloud deployment** | AWS/Azure network paths have different profiles — TCP adapts automatically |
+
+### Summary
+
+```
+Congestion Control = Network-friendly send rate management
+
+  Slow Start:     Exponential growth (cwnd × 2 per RTT)
+  Congestion Avoidance: Linear growth (cwnd + 1 per RTT)
+  Loss detected:  ssthresh = cwnd/2, cwnd reset
+  Fast Retransmit: 3 dup ACKs → resend immediately
+  Fast Recovery:   After dup ACKs, skip Slow Start, go to Congestion Avoidance
+
+  Effective Window = min(cwnd, rwnd)
+  AIMD: Additive Increase, Multiplicative Decrease
+```
 
 ---
 
