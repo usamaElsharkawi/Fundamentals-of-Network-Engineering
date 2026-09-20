@@ -9,7 +9,7 @@
 - [x] 38. MSS vs MTU vs PMTUD
 - [x] 39. Nagle's Algorithm's Effect on Performance
 - [x] 40. Delayed Acknowledgment Effect on Performance
-- [ ] 41. Cost of Connection Establishment
+- [x] 41. Cost of Connection Establishment
 - [ ] 42. TCP Fast Open
 - [ ] 43. Listening Server
 - [ ] 44. TCP Head of line blocking
@@ -831,7 +831,301 @@ Fix:       Nothing needed (OK)
 
 #### Lecture 41 — Cost of Connection Establishment
 
-<!-- Discussion notes will be added here -->
+### Lecture Notes — Discussion
+
+---
+
+### Unit 1: What Does "Cost" Mean?
+
+When we say "cost of connection establishment," we mean **everything you pay before a single byte of your application data flows.**
+
+```
+Before any HTTP request is served:
+  1. TCP 3-way handshake (1 RTT)
+  2. TLS handshake if HTTPS (1-2 RTT)
+  3. HTTP request -> response (1 RTT)
+
+Total before first byte of actual content: 3-4 RTT
+```
+
+**That's the cost.** Not the data transfer — the **setup.**
+
+---
+
+### Unit 2: The TCP Handshake Cost — In Numbers
+
+From TCP section, we know the 3-way handshake:
+
+```
+Client                    Server
+  │                          │
+  │──── SYN (Seq=X) ──────→│
+  │     "I want to connect"  │
+  │                          │
+  │←─── SYN-ACK (Seq=Y) ───│
+  │     "I accept"           │
+  │                          │
+  │──── ACK (Seq=X+1) ────→│
+  │     "Confirmed"          │
+  │                          │
+  │    ← ESTABLISHED →       │
+```
+
+**The cost: 1 full RTT before any data.**
+
+```
+t=0:   Client sends SYN
+t=RTT: Client receives SYN-ACK, sends ACK + HTTP request (combined)
+t=2×RTT: Server receives HTTP request, sends response
+t=3×RTT: Client receives response
+```
+
+**Total: ~2 RTT for first request** (1 RTT handshake + 1 RTT request/response)
+
+---
+
+### Unit 3: The TLS Handshake — The Extra Cost
+
+If you're using HTTPS (which most of the web is):
+
+```
+TCP 3-way handshake:     1 RTT
+TLS 1.2 handshake:       2 RTT (on top of TCP)
+TLS 1.3 handshake:       1 RTT (on top of TCP) — faster!
+HTTP request/response:   1 RTT
+
+Total (TLS 1.2): 1 + 2 + 1 = 4 RTT
+Total (TLS 1.3): 1 + 1 + 1 = 3 RTT
+```
+
+**At 50ms RTT:**
+
+```
+TLS 1.2: 4 x 50ms = 200ms before first byte of content
+TLS 1.3: 3 x 50ms = 150ms before first byte of content
+```
+
+**That's a quarter of a second** — just for setup. No content served yet.
+
+---
+
+### Unit 4: Memory Cost — Per Connection
+
+Each connection stores state on both sides:
+
+```
+Per connection on the server:
+  ├── Client IP, Client Port, Server Port
+  ├── Client Seq# (last received)
+  ├── Server Seq# (current)
+  ├── Window Size (how much client can receive)
+  ├── Connection State: ESTABLISHED
+  ├── Send Buffer / Receive Buffer
+  ├── Retransmission Timer
+  ├── Keep-Alive Timer
+  └── Congestion Window
+```
+
+**Memory cost: ~4KB-64KB per connection**
+
+```
+1,000 connections    =  16 MB
+10,000 connections   = 160 MB
+100,000 connections  = 1.6 GB
+1,000,000 connections = 16 GB (before any data flows!)
+```
+
+**This is why:**
+- Nginx default `max_connections`: 1024
+- Apache default: 150
+- You hit limits before your CPU or bandwidth does
+
+---
+
+### Unit 5: File Descriptor Cost
+
+Every connection = one **file descriptor (fd)** on the server.
+
+```
+Each TCP connection -> one fd
+Each fd -> kernel memory + process table entry
+```
+
+**Limits:**
+
+```
+Linux default: 1024 fds per process
+Tunable: ulimit -n (can increase to 100,000+)
+```
+
+**If you hit the fd limit:**
+
+```
+New connection -> "Too many open files" error
+Existing connections still work
+New users can't connect
+```
+
+**This is why connection pooling matters** — reuse existing connections instead of creating new ones.
+
+---
+
+### Unit 6: TIME_WAIT — The Hidden Cost
+
+After a connection closes, the client enters **TIME_WAIT** (2×MSL, typically 30-120 seconds).
+
+```
+Client closes connection
+  |
+Client enters TIME_WAIT (2xMSL = 60-120 seconds)
+  |
+During TIME_WAIT: the 4-tuple (src IP, src port, dst IP, dst port) is RESERVED
+  |
+Can't reuse the same 4-tuple for a new connection
+```
+
+**Why this matters for servers:**
+
+```
+Browser connects to: 10.0.2.10:8080
+Ephemeral port used: 52341
+Connection closes
+Port 52341 is in TIME_WAIT for 60 seconds
+
+Next connection: can't use 52341 again
+Must use a different ephemeral port
+```
+
+**If you open many short-lived connections:**
+
+```
+1000 connections per minute
+Each port in TIME_WAIT for 60 seconds
+Ephemeral port range: 32768-60999 = ~28000 ports
+
+28000 ports / 1000 connections/min = 28 minutes before exhaustion
+```
+
+**This is why:**
+- **Connection pooling** (reuse connections)
+- **`SO_REUSEADDR`** (allow reusing TIME_WAIT ports)
+- **HTTP/1.1 Keep-Alive** (persistent connections)
+
+---
+
+### Unit 7: The Total Cost — Putting It All Together
+
+**For a single HTTP request to a new server (TLS 1.3):**
+
+```
+Cost breakdown:
+  TCP 3-way handshake:    1 RTT     (50ms at 50ms RTT)
+  TLS 1.3 handshake:      1 RTT     (50ms)
+  HTTP request/response:  1 RTT     (50ms)
+                            -----------
+  Total:                  3 RTT     (150ms)
+
+Plus server resources:
+  Memory: ~16KB per connection
+  File descriptor: 1 fd
+  CPU: handshake processing
+```
+
+**For 100 sequential requests (no connection pooling):**
+
+```
+First request: 3 RTT (150ms) — full handshake
+Next 99 requests: 1 RTT each (50ms) — if HTTP/1.1 Keep-Alive
+Total: 150ms + 99 x 50ms = 5100ms = 5.1 seconds
+```
+
+**For 100 sequential requests (with connection pooling — 10 connections):**
+
+```
+10 handshakes: 10 x 3 RTT = 30 RTT = 1500ms
+100 requests over 10 connections: ~10 RTT = 500ms (pipelining)
+Total: ~2000ms = 2 seconds
+```
+
+**That's a 2.5x improvement** just from connection pooling.
+
+---
+
+### Unit 8: Solutions — How We Reduce This Cost
+
+```
+┌────────────────────────────────────────────────────────┐
+│  Solution                    What it does              │
+│                                                         │
+│  HTTP/1.1 Keep-Alive         Reuse TCP connection       │
+│                                  for multiple requests    │
+│                                                         │
+│  HTTP/2 Multiplexing           Multiple requests over     │
+│                                  ONE TCP connection       │
+│                                                         │
+│  HTTP/3 (QUIC)               Built on UDP, no TCP       │
+│                                  handshake overhead       │
+│                                                         │
+│  Connection Pooling          Pre-establish connections   │
+│                                  (PgBouncer, ProxySQL)    │
+│                                                         │
+│  TCP Fast Open (Lecture 42)  Send data in SYN packet    │
+│                                  -> saves 1 RTT           │
+│                                                         │
+│  TLS Session Resumption      Skip full TLS handshake     │
+│                                  on return visits         │
+│                                                         │
+│  CDN                         Move content closer         │
+│                                  -> lower RTT             │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Unit 9: TCP Fast Open — Preview (Lecture 42)
+
+The solution to the 1 RTT handshake cost:
+
+```
+Normal: SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data)
+TCP Fast Open: SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
+```
+
+TCP Fast Open lets you send data **in the SYN packet itself**. The server has been "pre-warmed" — it remembers your previous connection and trusts the data in the SYN.
+
+**But:** Requires a previous connection to establish the TFO cookie. First connection still costs 1 RTT.
+
+---
+
+### Unit 10: Practical Impact for Full-Stack Engineers
+
+| Scenario | What you experience | What to do |
+|---|---|---|
+| **First API call is slow** | TCP + TLS handshake overhead | Connection pooling, CDN |
+| **Many short API calls** | Repeated handshake costs | Keep-Alive, HTTP/2, connection pool |
+| **Database connection slow** | TCP handshake per query | PgBouncer, ProxySQL (connection pooler) |
+| **Server has many connections** | Memory exhaustion (16KB each) | `max_connections` tuning, connection pool |
+| **Port exhaustion** | "Too many open files" / TIME_WAIT | `SO_REUSEADDR`, connection pool, ephemeral port range increase |
+| **Mobile app on slow network** | RTT x 3-4 before content | TFO, CDN, TLS 1.3, aggressive caching |
+
+---
+
+### Key Takeaways — Lecture 41
+
+1. **Connection cost = everything before your data flows** — handshake, TLS, setup
+2. **TCP handshake = 1 RTT** before any data
+3. **TLS 1.2 = 2 extra RTT**, TLS 1.3 = 1 extra RTT
+4. **Total first request = 3-4 RTT** (150-200ms at 50ms RTT)
+5. **Memory cost** = ~4KB-64KB per connection -> limits max connections
+6. **File descriptor limit** = each connection uses one fd
+7. **TIME_WAIT** = ports locked for 60-120 seconds after connection closes
+8. **Connection pooling** = the most impactful optimization for repeated connections
+9. **TCP Fast Open** = sends data in SYN -> saves 1 RTT (covered in Lecture 42)
+10. **HTTP/2, HTTP/3** = designed specifically to reduce connection overhead
+
+---
+
+#### Lecture 42 — TCP Fast Open
 
 #### Lecture 42 — TCP Fast Open
 
