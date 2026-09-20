@@ -8,7 +8,7 @@
 - [x] 37. What is this section?
 - [x] 38. MSS vs MTU vs PMTUD
 - [x] 39. Nagle's Algorithm's Effect on Performance
-- [ ] 40. Delayed Acknowledgment Effect on Performance
+- [x] 40. Delayed Acknowledgment Effect on Performance
 - [ ] 41. Cost of Connection Establishment
 - [ ] 42. TCP Fast Open
 - [ ] 43. Listening Server
@@ -517,9 +517,317 @@ socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
 #### Lecture 40 — Delayed Acknowledgment Effect on Performance
 
-#### Lecture 40 — Delayed Acknowledgment Effect on Performance
+### Lecture Notes — Discussion
 
-<!-- Discussion notes will be added here -->
+---
+
+### Unit 1: What is a Delayed ACK?
+
+**Delayed ACK = The receiver holds off on sending the ACK for a short time.**
+
+Why would it do that? **Efficiency.** Same logic as Nagle but on the receiver side.
+
+```
+Without Delayed ACK:
+  receive 1 byte -> send ACK (40 bytes of overhead for 1 byte!)
+  receive 1 byte -> send ACK (40 bytes of overhead for 1 byte!)
+  receive 1 byte -> send ACK (40 bytes of overhead for 1 byte!)
+
+With Delayed ACK:
+  receive 1 byte -> wait...
+  receive 1 byte -> wait...
+  receive 1 byte -> NOW send ONE ACK for all three
+```
+
+**Same idea as Nagle, but for ACKs instead of data.**
+
+---
+
+### Unit 2: The Two Rules of Delayed ACK
+
+TCP implementations typically use **two triggers** to send a delayed ACK:
+
+```
+Rule 1: Wait up to 40ms (Linux: 40ms, some: 50-200ms)
+        -> If no second packet arrives within the timer, send ACK
+
+Rule 2: Receive 2 segments (packets)
+        -> Immediately send ACK for both
+```
+
+**The key numbers:**
+
+| Parameter | Typical Value |
+|---|---|
+| Delay timer | 40ms (Linux) |
+| Segment threshold | 2 segments |
+| ACK always sent immediately | When window is 0 or PSH flag is set |
+
+---
+
+### Unit 3: Why Does Delayed ACK Exist?
+
+**Same reason as Nagle — reduce overhead.**
+
+```
+Without Delayed ACK:
+  1 byte data + 40 bytes headers = 41 bytes -> ACK sent immediately
+  1 byte data + 40 bytes headers = 41 bytes -> ACK sent immediately
+  Total: 82 bytes for 2 bytes of data (2.4% efficiency)
+
+With Delayed ACK:
+  2 bytes data + 40 bytes headers = 42 bytes -> ONE ACK sent after delay
+  Total: 42 bytes for 2 bytes of data (95% efficiency)
+```
+
+**Delayed ACK cuts ACK traffic roughly in half.**
+
+---
+
+### Unit 4: The Interaction with Nagle — THE Critical Part
+
+```
+Nagle says:       "Wait for ACK before sending more"
+Delayed ACK says: "Wait before sending ACK"
+
+Both waiting -> potential deadlock -> latency spikes
+```
+
+**Step-by-step trace:**
+
+```
+t=0:   Client sends "H" (1 byte)
+       Nagle: No unacked data -> sent immediately (OK)
+       Server receives "H"
+       Server: Delayed ACK timer starts (40ms)
+                |
+t=0:   Client sends "e" (1 byte)
+       Nagle: "H" is unacknowledged -> BUFFER it (!!)
+                |
+t=40ms: Server timer fires
+       Server sends ACK for "H"
+                |
+t=40ms: Client receives ACK for "H"
+       Nagle: No unacked data -> flush buffer -> send "e" (OK)
+                |
+t=40ms: Server receives "e"
+       Server: Delayed ACK timer starts (40ms)
+                |
+t=40ms: Client sends "l" (1 byte)
+       Nagle: "e" is unacknowledged -> BUFFER (!!)
+                |
+t=80ms: Server timer fires -> sends ACK
+                |
+t=80ms: Client flushes buffer -> sends "llo"
+```
+
+**Pattern:** Every single byte has to wait for:
+1. The Delayed ACK timer (40ms)
+2. Then Nagle to flush
+
+**Total extra delay per byte: ~40ms**
+
+For typing "Hello":
+
+```
+"H" -> immediate
+"e" -> +40ms wait
+"l" -> +40ms wait
+"l" -> +40ms wait
+"o" -> +40ms wait
+
+Total added latency: 160ms for 5 characters
+```
+
+---
+
+### Unit 5: Processing vs ACK — The Key Clarification
+
+**The server does NOT wait for the Delayed ACK timer before processing the request.**
+
+These are **two completely separate things:**
+
+```
+Application Layer: "I got data, let me process it" -> STARTS PROCESSING (OK)
+TCP Layer:         "I got data, I will ACK later"  -> Starts 40ms timer (OK)
+```
+
+**The Delayed ACK timer lives in the TCP stack.** It has **nothing to do** with application processing.
+
+**The corrected flow:**
+
+```
+t=0:   Client sends GET /api (small packet)
+t=0:   Server NIC receives packet
+t=0:   TCP stack: stores in receive buffer
+t=0:   TCP stack: Delayed ACK timer starts (40ms)
+t=0:   Application: "Got GET /api" -> STARTS PROCESSING (OK)
+t=0:   Application: "I have the response" -> sends HTTP 200 + body
+t=0:   TCP stack: Nagle check -> no unacked data -> SENDS response (OK)
+t=0:   Client receives response
+t=0:   Client sends ACK for response
+t=0:   Server receives ACK -> Nagle happy (OK)
+                |
+t=40ms: Server Delayed ACK timer for original GET fires
+        -> Sends ACK for GET (finally, but who cares?)
+```
+
+**The server processed the request and sent the response IMMEDIATELY at t=0.** The Delayed ACK fired 40ms later, but by then the response was already sent and received.
+
+---
+
+### Unit 6: When Delayed ACK ACTUALLY Hurts
+
+**The 40ms problem only happens in a specific pattern:**
+
+```
+Pattern: Small request -> Small response -> Small request -> Small response...
+
+Step 1: Client sends small request (1 segment)
+Step 2: Server receives it -> Delayed ACK timer starts
+Step 3: Server sends small response (1 segment)
+Step 4: Client receives response -> Delayed ACK timer starts
+Step 5: Client sends next request -> Nagle says "wait for ACK of response"
+Step 6: Client is BLOCKED until Delayed ACK timer fires (40ms)
+Step 7: ACK sent -> Nagle flushes -> next request sent
+```
+
+**The deadlock happens when:**
+1. Each side sends small packets
+2. Each side has Delayed ACK enabled
+3. The sender has unacknowledged data when it wants to send the next thing
+
+---
+
+### When It Does NOT Hurt
+
+**Large data flows fine:**
+
+```
+Client sends: GET /large-file.zip (1 large packet, 1460 bytes)
+Server receives it -> Delayed ACK timer starts
+Server immediately sends response: 200 OK + file data (large)
+
+Because the response is large (multiple segments),
+the server Delayed ACK for the GET request
+fires while data is flowing -> no deadlock
+
+TCP_NODELAY not needed — large data flows fine
+```
+
+**Why it works:** Large data = multiple segments = Delayed ACK timer fires (2 segments received) = no blocking.
+
+---
+
+### Unit 7: TCP_QUICKACK — Directly Disable Delayed ACK
+
+**TCP_QUICKACK = Directly disable Delayed ACK on the receiver.**
+
+```c
+// C / Linux
+int flag = 1;
+setsockopt(socket, IPPROTO_TCP, TCP_QUICKACK, &flag, sizeof(flag));
+```
+
+**What it does:** Tells the kernel — "Don't delay ACKs. Send them immediately."
+
+**TCP_NODELAY vs TCP_QUICKACK:**
+
+| Option | Controls | Side | Persistence |
+|---|---|---|---|
+| **TCP_NODELAY** | Nagle's Algorithm (sender buffers data) | **Sender** | Persistent (OK) |
+| **TCP_QUICKACK** | Delayed ACK (receiver delays ACKs) | **Receiver** | Resets on next packet (!!) |
+
+**Important:** TCP_QUICKACK is **not permanent** on Linux. After the next data packet is received, Linux automatically re-enables Delayed ACK. So you need to set it each time.
+
+This is why most implementations focus on TCP_NODELAY — it's simpler and more persistent. But TCP_QUICKACK gives you **direct control** over the receiver side.
+
+---
+
+### Unit 8: The Complete Picture
+
+```
+SENDER                                    RECEIVER
+
+Nagle's Algorithm (TCP_NODELAY)          Delayed ACK
+Controls: Whether to buffer or send      Controls: When to send ACK
+Disable with: TCP_NODELAY                Disable with: TCP_QUICKACK
+```
+
+**Both sides can independently control their buffering behavior.**
+
+---
+
+### Unit 9: Full-Stack Decision Framework
+
+```
+What does your app send?
+
+Small + Frequent (chat, typing, game input, live
+notifications, stock ticks)?
+   -> TCP_NODELAY = true (sender)
+   -> TCP_QUICKACK = true (receiver)
+   -> Accept the header overhead
+
+Large + Infrequent (file upload, API response,
+batch operations, database sync)?
+   -> Leave defaults (both Nagle + Delayed ACK)
+   -> Efficient bandwidth
+
+UNCLEAR -> Start with defaults
+           Profile -> then decide
+```
+
+---
+
+### Unit 10: Practical Impact for Full-Stack Engineers
+
+| Scenario | What happens | What to do |
+|---|---|---|
+| **WebSocket chat** | Typing delay from Delayed ACK + Nagle | TCP_NODELAY + TCP_QUICKACK |
+| **REST API** | ~40ms added per request in chain | Usually negligible; profile if slow |
+| **Database protocol** | Query/response adds small delay | Connection poolers may help |
+| **Real-time gaming** | Input lag from ACK delays | TCP_NODELAY essential |
+| **HTTP/2, HTTP/3** | Multiplexing reduces impact | Built-in optimization |
+| **File download** | Large data flows fine | Default is fine (OK) |
+
+---
+
+### Unit 11: The Debugging Rule
+
+> "Mysterious ~40ms delays on small messages? It is Nagle + Delayed ACK."
+
+```
+Symptom:  "My WebSocket chat feels laggy"
+Diagnosis: Nagle buffering + Delayed ACK waiting
+Fix:       socket.setNoDelay(true) + TCP_QUICKACK on server
+
+Symptom:  "My API responds fast for large payloads but slow for small"
+Diagnosis: Nagle + Delayed ACK interaction
+Fix:       TCP_NODELAY + TCP_QUICKACK
+
+Symptom:  "My file upload works fine"
+Diagnosis: Everything is working as designed
+Fix:       Nothing needed (OK)
+```
+
+---
+
+### Key Takeaways — Lecture 40
+
+1. **Delayed ACK** = receiver waits before sending ACK (40ms or 2 segments)
+2. **Purpose** = reduce ACK overhead (same idea as Nagle, opposite side)
+3. **Two triggers**: timer (40ms) OR 2 segments received
+4. **Nagle + Delayed ACK interaction** = both sides waiting = ~40ms delay per interaction
+5. **Server processes immediately** — Delayed ACK is in TCP stack, not application layer
+6. **TCP_QUICKACK** = directly disable Delayed ACK (receiver side)
+7. **TCP_NODELAY** = disable Nagle (sender side) — more persistent than TCP_QUICKACK
+8. **For real-time apps**: Both options together = maximum low-latency performance
+9. **For bulk transfer**: Leave defaults — they work together efficiently
+
+---
+
+#### Lecture 41 — Cost of Connection Establishment
 
 #### Lecture 41 — Cost of Connection Establishment
 
