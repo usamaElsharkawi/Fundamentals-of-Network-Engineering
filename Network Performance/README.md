@@ -7,7 +7,7 @@
 
 - [x] 37. What is this section?
 - [x] 38. MSS vs MTU vs PMTUD
-- [ ] 39. Nagle's Algorithm's Effect on Performance
+- [x] 39. Nagle's Algorithm's Effect on Performance
 - [ ] 40. Delayed Acknowledgment Effect on Performance
 - [ ] 41. Cost of Connection Establishment
 - [ ] 42. TCP Fast Open
@@ -255,7 +255,267 @@ ping -f -l 1472 8.8.8.8
 
 #### Lecture 39 — Nagle's Algorithm's Effect on Performance
 
-<!-- Discussion notes will be added here -->
+### Lecture Notes — Discussion
+
+---
+
+### Unit 1: The Problem — Why Does Nagle's Algorithm Exist?
+
+Back to our **header overhead** lessons from IP and TCP sections:
+
+```
+TCP segment with 1 byte of data:
+  20 bytes TCP header + 20 bytes IP header + 1 byte data = 41 bytes sent
+  Efficiency: 1/41 = 2.4%
+```
+
+**The problem:** When an application sends many small writes, each one becomes its own segment. Each segment carries 40+ bytes of headers for just a few bytes of actual data. Terrible waste.
+
+**Real example — Chat app typing character by character:**
+
+```
+send("H")  → 41 bytes sent (2.4% efficient)
+send("e")  → 41 bytes sent (2.4% efficient)
+send("l")  → 41 bytes sent (2.4% efficient)
+send("l")  → 41 bytes sent (2.4% efficient)
+send("o")  → 41 bytes sent (2.4% efficient)
+─────────────────────────────────────────────
+Total: 205 bytes sent to deliver "Hello" (5 bytes of data)
+```
+
+**That's the problem Nagle's Algorithm solves.**
+
+---
+
+### Unit 2: The Solution — How Nagle's Algorithm Works
+
+Nagle's idea:
+
+> **Don't send small pieces. Buffer them and send them together.**
+
+**The Rule:**
+
+```
+If there is unacknowledged data still in flight → buffer new data
+If no unacknowledged data → send immediately
+```
+
+```
+send("H") → No data in flight → SEND NOW (1 packet)
+                ↓
+          Waiting for ACK...
+
+send("e") → Data in flight (H unacknowledged) → BUFFER
+send("l") → Data in flight → BUFFER
+send("l") → Data in flight → BUFFER
+send("o") → Data in flight → BUFFER
+
+ACK for "H" arrives → Now send "ello" as ONE packet
+```
+
+**Result:**
+
+```
+Before Nagle: 5 packets = 205 bytes (for 5 bytes of data)
+After Nagle:  2 packets = 82 bytes (for 5 bytes of data)
+```
+
+Even better if all 5 characters arrive before the ACK:
+
+```
+1 packet: "Hello" = 41 bytes (97.6% efficient)
+```
+
+---
+
+### Unit 3: The Core Mechanism
+
+```
+┌──────────────────────────────────────────────────────┐
+│              Nagle's Algorithm                        │
+│                                                       │
+│  When app calls send(data):                           │
+│                                                       │
+│   ┌─────────────────────────────┐                     │
+│   │ Is there unacknowledged     │                     │
+│   │ data in flight?             │                     │
+│   └──────────┬──────────────────┘                     │
+│              │                                       │
+│         YES  │         NO                             │
+│              │         │                              │
+│              ▼         ▼                              │
+│     Buffer the    Send immediately                   │
+│     new data      (no unacked data)                  │
+│              │                                       │
+│   When ACK arrives for previous data:                │
+│   → Flush buffered data as one segment                │
+│   → Repeat                                            │
+└──────────────────────────────────────────────────────┘
+```
+
+**Key insight:** Nagle's algorithm is essentially saying — *"Wait a tiny bit. If more data is coming, batch it. If not, send what you have."*
+
+---
+
+### Unit 4: The Trade-off
+
+| Nagle **Enabled** (default) | Nagle **Disabled** |
+|---|---|
+| Less header overhead | More header overhead |
+| Adds latency (waits for ACK) | Lower latency |
+| Good for bulk transfer | Good for real-time apps |
+| Efficient bandwidth | Immediate delivery |
+
+**Latency cost:**
+
+```
+send("H") → sent immediately
+send("e") → WAITS for ACK of "H" (up to 1 RTT)
+send("l") → WAITS
+send("l") → WAITS
+send("o") → WAITS
+
+Total delay: ~1 RTT (not 5 RTTs — all buffered data sent together)
+```
+
+---
+
+### Unit 5: Maximum Latency — Correction
+
+**Wrong formula:** `number of segments × RTT`
+
+**Correct answer:** `~1 RTT`
+
+Why: When the ACK finally arrives, ALL buffered data is flushed together as one burst. You don't send them one by one with one RTT each.
+
+```
+t=0:   send("H") → SENT IMMEDIATELY
+t=0:   send("e") → BUFFERED
+t=0:   send("l") → BUFFERED
+t=0:   send("l") → BUFFERED
+t=0:   send("o") → BUFFERED
+                ↓
+t=RTT: ACK for "H" arrives
+                ↓
+t=RTT: "ello" SENT AS ONE SEGMENT ← ALL at once!
+
+Total time from first send to last data: ~1 RTT
+```
+
+---
+
+### Unit 6: The Exact Rule (Formal Definition)
+
+One precise rule, two branches:
+
+```
+If there is unacknowledged data in flight:
+   → Buffer the new data (don't send)
+
+If there is NO unacknowledged data in flight:
+   → Send immediately (even if data is tiny)
+```
+
+**Important nuance:** Nagle doesn't control WHEN the ACK comes. It only controls whether to send or buffer. ACK timing depends on:
+- Network speed (RTT)
+- Delayed ACKs (receiver waits before acknowledging — Lecture 40)
+- Receiver's buffer processing speed
+
+---
+
+### Unit 7: Interaction with Delayed ACKs (Preview)
+
+Nagle and Delayed ACKs can create a problematic interaction:
+
+```
+Nagle says:       "Wait for ACK before sending more"
+Delayed ACK says: "Wait before sending ACK"
+
+Both waiting → potential deadlock → latency spikes
+```
+
+**Example:**
+
+```
+Client: send("H") → sent immediately
+Client: send("e") → buffered (waiting for ACK)
+                ↓
+Server: received "H" → Delayed ACK timer starts (waits 40ms or for 2nd segment)
+                ↓
+Client: still waiting for ACK (Nagle won't send "e")
+Server: waiting 40ms before sending ACK (Delayed ACK)
+                ↓
+t=40ms: Server sends ACK
+                ↓
+Client: ACK received → sends "ello"
+```
+
+**Result:** Extra 40ms delay from the interaction. We'll cover this in depth in Lecture 40.
+
+---
+
+### Unit 8: How to Disable Nagle — `TCP_NODELAY`
+
+When real-time performance is needed, turn Nagle off:
+
+```c
+// C / Linux
+int flag = 1;
+setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+```
+
+```javascript
+// Node.js
+socket.setNoDelay(true);
+```
+
+```python
+# Python
+socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+```
+
+**What this does:** Tells TCP — "Never buffer my data. Send every write immediately."
+
+**Trade-off:** Lowest latency but maximum header overhead.
+
+---
+
+### Unit 9: Real-World Decision Framework
+
+```
+                    ┌─────────────────────────┐
+                    │  Is your app real-time?   │
+                    └──────────┬──────────────┘
+                               │
+                    YES ───────┴─────── NO
+                    │                     │
+                    ▼                     ▼
+            TCP_NODELAY ON        Nagle ON (default)
+            Low latency            Efficient bandwidth
+            High overhead          Low overhead
+            Example:               Example:
+            • Chat typing          • File upload
+              indicators             • Email sync
+            • Game state           • API bulk requests
+              updates                • Log streaming
+            • VoIP/Video           • Database replication
+```
+
+---
+
+### Key Takeaways — Lecture 39
+
+1. **Nagle's Algorithm** buffers small writes and sends them together to reduce header overhead
+2. **The Rule:** If unacknowledged data in flight → buffer; if none → send immediately
+3. **Max latency added:** ~1 RTT (not N × RTT — all buffered data sent at once)
+4. **Trade-off:** Efficiency vs latency — Nagle for bulk, TCP_NODELAY for real-time
+5. **Nagle + Delayed ACKs** can interact causing extra delay (covered in Lecture 40)
+6. **TCP_NODELAY** disables Nagle — used by real-time apps (chat, gaming, VoIP)
+7. **Header overhead** is the root cause — 40+ bytes of headers for 1 byte of data = 2.4% efficiency
+
+---
+
+#### Lecture 40 — Delayed Acknowledgment Effect on Performance
 
 #### Lecture 40 — Delayed Acknowledgment Effect on Performance
 
