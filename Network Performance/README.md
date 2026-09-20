@@ -10,7 +10,7 @@
 - [x] 39. Nagle's Algorithm's Effect on Performance
 - [x] 40. Delayed Acknowledgment Effect on Performance
 - [x] 41. Cost of Connection Establishment
-- [ ] 42. TCP Fast Open
+- [x] 42. TCP Fast Open
 - [ ] 43. Listening Server
 - [ ] 44. TCP Head of line blocking
 - [ ] 45. The importance of Proxy and Reverse Proxies
@@ -1127,9 +1127,176 @@ TCP Fast Open lets you send data **in the SYN packet itself**. The server has be
 
 #### Lecture 42 — TCP Fast Open
 
-#### Lecture 42 — TCP Fast Open
+### Lecture Notes — Discussion
 
-<!-- Discussion notes will be added here -->
+---
+
+### TCP Fast Open — In Isolation
+
+**TCP Fast Open (TFO) = Send data in the SYN packet, skipping one RTT of the handshake.**
+
+Normal TCP:
+```
+SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data flows)
+```
+
+TCP Fast Open:
+```
+SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
+```
+
+**How it works:**
+1. Client has connected before — server gave it a **TFO cookie**
+2. Next connection: client puts data in the SYN packet
+3. Server receives SYN + data, processes it immediately
+4. No need to wait for ACK before sending data
+
+**The catch:** Requires a previous connection to get the cookie. First connection still costs 1 RTT.
+
+---
+
+### Connection Pooling — In Isolation
+
+**Connection Pooling = Pre-establishing a set of TCP connections and reusing them instead of creating new ones for each request.**
+
+```
+Without Pooling (naive):
+  Request 1: create connection -> handshake (150ms) -> request -> close
+  Request 2: create connection -> handshake (150ms) -> request -> close
+  Request 3: create connection -> handshake (150ms) -> request -> close
+  Every request pays the full handshake cost.
+
+With Pooling:
+  Pool creates 10 connections at startup (10 x 150ms = 1.5s one-time cost)
+  Request 1: use existing connection -> request (50ms) -> keep open
+  Request 2: use existing connection -> request (50ms) -> keep open
+  Only pay handshake cost once per pooled connection.
+```
+
+**The pool is a container of pre-established connections.** App borrows a connection, uses it, returns it, borrows another — never creates from scratch.
+
+**Real-world examples:**
+
+| Technology | What it pools |
+|---|---|
+| PgBouncer | PostgreSQL connections |
+| ProxySQL | MySQL connections |
+| HikariCP | Java JDBC connections |
+| Nginx upstream | Upstream server connections |
+
+**The Math:**
+
+```
+Without pooling — 1000 requests, new connection each time:
+  1000 x 3 RTT = 3000 RTT = 150 seconds at 50ms RTT
+
+With pooling — 1000 requests, 10 pooled connections:
+  10 x 3 RTT (initial pool) = 30 RTT = 1.5 seconds
+  1000 x 50ms (request over existing) = 50 seconds
+  Total: ~51.5 seconds
+
+~30x faster with pooling.
+```
+
+---
+
+### Eager vs Lazy Loading — In Isolation
+
+Two strategies for **when** to create connections in the pool.
+
+---
+
+#### Eager Loading = Create Everything Upfront
+
+> "I'd rather pay the cost now than later."
+
+```
+App starts
+  -> Pool creates ALL connections immediately
+  -> Every connection is ready to use
+  -> First request: instant (no waiting)
+```
+
+| Pros | Cons |
+|---|---|
+| First request is fast | Startup is slow |
+| Predictable startup cost | Wastes resources if unused |
+| No cold start latency | Idle connections if traffic is low |
+
+---
+
+#### Lazy Loading = Create on Demand
+
+> "I'll pay the cost only when I need it."
+
+```
+App starts
+  -> Pool has 0 connections
+  -> First request arrives
+  -> Pool creates 1 connection (150ms)
+  -> Uses it, returns it
+  -> Second request: reuse (50ms)
+  -> Third request: create another if needed
+```
+
+| Pros | Cons |
+|---|---|
+| App starts instantly | First request is slow |
+| Only pays for what's used | Unpredictable latency |
+| Minimal waste | Connection creation under load causes delays |
+
+---
+
+#### Side-by-Side
+
+| | Eager | Lazy |
+|---|---|---|
+| **Startup cost** | High | Zero |
+| **First request** | Fast | Slow |
+| **Resource usage** | Fixed | Variable |
+| **Predictability** | High | Low |
+| **Best for** | High-traffic apps | Low-traffic / sporadic |
+
+---
+
+### How They Relate
+
+```
+Connection Pooling = THE STRATEGY (reuse connections)
+Eager Loading = WHEN to create (all upfront)
+Lazy Loading = WHEN to create (on demand)
+```
+
+**Connection pooling is the strategy. Eager/Lazy are initialization strategies for the pool.**
+
+---
+
+### Full-Stack Decision Framework
+
+| Scenario | Best Initialization | Why |
+|---|---|---|
+| **High-traffic API** (1000+ req/s) | **Eager** | All connections ready, no cold start |
+| **Low-traffic internal tool** | **Lazy** | Don't waste connections for rare requests |
+| **Microservice with bursty traffic** | **Lazy with min pool size** | Start small, grow on demand |
+| **Database connection pool** | **Eager** (usually) | DB connections are expensive, better ready |
+| **Serverless / Lambda** | **Lazy** | Connections don't persist between invocations |
+
+---
+
+### Key Takeaways — Lecture 42
+
+1. **TCP Fast Open** = send data in SYN, saves 1 RTT (requires previous connection for cookie)
+2. **Connection Pooling** = pre-establish connections, reuse them (avoid handshake per request)
+3. **Without pooling**: every request pays full handshake cost
+4. **With pooling**: handshake cost paid once per pooled connection
+5. **Eager loading** = create all connections at startup (fast first request, slow startup)
+6. **Lazy loading** = create on demand (instant startup, slow first request)
+7. **Eager** = high-traffic, **Lazy** = low/sporadic traffic
+8. **Connection pooling + Eager/Lazy** = how you initialize the pool strategy
+
+---
+
+#### Lecture 43 — Listening Server
 
 #### Lecture 43 — Listening Server
 
