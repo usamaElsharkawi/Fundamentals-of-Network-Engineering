@@ -12,7 +12,7 @@
 - [x] 41. Cost of Connection Establishment
 - [x] 42. TCP Fast Open
 - [ ] 43. Listening Server
-- [ ] 44. TCP Head of line blocking
+- [x] 44. TCP Head of line blocking
 - [ ] 45. The importance of Proxy and Reverse Proxies
 - [ ] 46. Load Balancing at Layer 4 vs Layer 7
 - [ ] 47. Network Access Control to Database Servers
@@ -1676,11 +1676,273 @@ The instructor will cover Node.js-specific listen behavior:
 
 ---
 
-#### Lecture 44 -- TCP Head of Line Blocking
-
 #### Lecture 44 — TCP Head of Line Blocking
 
-<!-- Discussion notes will be added here -->
+### Lecture Notes — Discussion
+
+---
+
+### Unit 1: What Is Head-of-Line Blocking?
+
+> **Head-of-Line (HOL) Blocking = One stalled request blocks all requests behind it.**
+
+In a pipeline of requests, if the first request is stuck, everything after it waits — even if those later requests arrived fine.
+
+```
+Request A → Request B → Request C → Request D
+
+If Request A is stuck:
+  Request B → BLOCKED (waiting for A)
+  Request C → BLOCKED (waiting for A)
+  Request D → BLOCKED (waiting for A)
+```
+
+---
+
+### Unit 2: HOL Blocking in TCP — Transport Layer
+
+**TCP's core rule:** Deliver data to the application ONLY in order.
+
+```
+If you send segments 1, 2, 3, 4:
+  TCP will NOT deliver segment 2 to the app
+  until segment 1 has been received.
+```
+
+**The scenario:**
+
+```
+You send: Segment 1 → Segment 2 → Segment 3 → Segment 4
+
+Segment 1: Took a congested path → LOST
+Segment 2: Took a different path → Arrived
+Segment 3: Took a different path → Arrived
+Segment 4: Took a different path → Arrived
+```
+
+**What happens?**
+
+```
+Receiver got: 2, 3, 4
+Receiver expects: 1
+
+Receiver CANNOT deliver 2, 3, 4 to the application
+because TCP delivers in order.
+
+Receiver sends: Duplicate ACKs for segment 1
+```
+
+---
+
+### Unit 3: Retransmission — Without SACK
+
+**Without Selective Acknowledgment (SACK):**
+
+```
+Receiver sends 3 duplicate ACKs for segment 1
+Sender triggers Fast Retransmit
+Sender retransmits: ALL segments (1, 2, 3, 4)
+
+Even though 2, 3, 4 already arrived!
+```
+
+**With SACK:**
+
+```
+Receiver tells sender: "I have 2, 3, 4. I only need 1."
+Sender retransmits: ONLY segment 1
+```
+
+**But even with SACK**, the application is still blocked — segments 2, 3, 4 can't be used until segment 1 arrives.
+
+---
+
+### Unit 4: THE REAL PROBLEM — Multiple Requests on One Connection
+
+This is the **HTTP/2 multiplexing** problem.
+
+**HTTP/2 sends multiple requests (streams) over ONE TCP connection:**
+
+```
+TCP Connection (one pipe)
+  |
+  |-- Stream 1: Request 1 (LARGE — >2000 bytes, needs multiple segments)
+  |-- Stream 2: Request 2 (small)
+  |-- Stream 3: Request 3 (small)
+  -- Stream 4: Request 4 (small)
+```
+
+**Each request is INDEPENDENT:**
+
+```
+Request 2 doesn't care about Request 1.
+Request 3 doesn't care about Request 2.
+They're stateless — completely separate.
+```
+
+**But TCP doesn't know that.** TCP sees everything as one blob of bytes.
+
+---
+
+### Unit 5: How HOL Blocking Kills Multiple Requests
+
+**Request 1 is large → split into segments:**
+
+```
+Segment 1: Part of Request 1
+Segment 2: Part of Request 1
+Segment 3: Part of Request 1
+Segment 4: Part of Request 1
+```
+
+**Requests 2, 3, 4 are small → each fits in one segment:**
+
+```
+Segment 5: Request 2
+Segment 6: Request 3
+Segment 7: Request 4
+```
+
+**Segments are interleaved on the wire:**
+
+```
+Wire: Seg 1 (Req 1) → Seg 5 (Req 2) → Seg 2 (Req 1) → Seg 6 (Req 3) → Seg 3 (Req 1) → Seg 7 (Req 4) → Seg 4 (Req 1)
+```
+
+**Segment 1 (Request 1) is LOST:**
+
+```
+Arrived at receiver:
+  Seg 5 (Req 2) ✅
+  Seg 2 (Req 1) ✅
+  Seg 6 (Req 3) ✅
+  Seg 7 (Req 4) ✅
+  Seg 3 (Req 1) ✅
+  Seg 4 (Req 1) ✅
+
+Missing:
+  Seg 1 (Req 1) ❌
+```
+
+**Now here's the killer:**
+
+```
+Request 2 is READY (Seg 5 arrived)
+  → Application says: "Deliver Request 2 please!"
+  → TCP says: "NO. Seg 1 is missing. I can't deliver anything out of order."
+  → Request 2 is BLOCKED ❌
+
+Request 3 is READY (Seg 6 arrived)
+  → BLOCKED ❌
+
+Request 4 is READY (Seg 7 arrived)
+  → BLOCKED ❌
+```
+
+**ALL requests are blocked because ONE segment of ONE request is missing.**
+
+---
+
+### Unit 6: The Scale of the Problem
+
+```
+If 10 requests are multiplexed over one TCP connection
+and the first segment of the first request is lost:
+
+  ALL 10 requests are blocked
+  ALL 10 must wait for retransmission
+  ALL 10 are delayed by the same amount
+```
+
+**The instructor's exact words:**
+
+> "Imagine ten requests. If the first segment is dead, your ten requests will not be delivered. You will have to resend all of them. That is a huge problem."
+
+---
+
+### Unit 7: WHY This Happens — TCP Doesn't Know About Streams
+
+```
+Application Layer
+  Stream 1: Request 1 (independent)
+  Stream 2: Request 2 (independent)
+  Stream 3: Request 3 (independent)
+  "These are separate! Don't block me!"
+
+          ↓
+
+TCP Layer
+  "I see a byte stream.
+   Segment 1 is missing.
+   I can't deliver anything until segment 1 arrives.
+   I don't know about streams.
+   I don't care.
+   Everything waits."
+```
+
+**TCP is content-agnostic.** It treats everything as one byte stream. It has NO concept of "this byte belongs to Request 2."
+
+---
+
+### Unit 8: How HTTP/3 (QUIC) Solves It
+
+**QUIC has stream awareness** — built at the application layer, on top of UDP:
+
+```
+QUIC Layer (replaces TCP)
+  Stream 1: Independent flow control
+  Stream 2: Independent flow control
+  Stream 3: Independent flow control
+
+  Loss in Stream 1 → Only Stream 1 waits
+  Stream 2, 3 → Flow freely ✅
+
+          ↓
+
+UDP Layer
+  (No ordering, no HOL blocking)
+```
+
+**Each stream in QUIC is independent.** Loss in one stream doesn't block others.
+
+---
+
+### Unit 9: The Complete Picture
+
+```
+HTTP/1.1:
+  Multiple TCP connections (one per request)
+  No multiplexing → no HTTP-level HOL
+  But: Connection overhead
+
+HTTP/2:
+  One TCP connection, multiplexed streams
+  Solves connection overhead
+  INTRODUCES TCP HOL blocking (one loss = all streams blocked)
+
+HTTP/3:
+  One QUIC connection, multiplexed streams
+  Solves connection overhead
+  Solves HOL blocking (independent streams at QUIC level)
+```
+
+---
+
+### Key Takeaways — Lecture 44
+
+1. **HOL Blocking** = One stalled item blocks everything behind it
+2. **TCP delivers in order** — missing segment blocks everything after it
+3. **Without SACK** — sender retransmits ALL segments, not just the missing one
+4. **HTTP/2 multiplexing** = multiple requests share ONE TCP connection
+5. **TCP doesn't know about streams** — it sees one byte stream
+6. **One lost segment** = ALL multiplexed requests blocked
+7. **10 requests, 1 loss** = all 10 blocked
+8. **HTTP/3 (QUIC)** = stream-aware, independent flow control, no cross-stream blocking
+9. **HTTP/2's trade-off** = multiplexing solved connection overhead but created HOL vulnerability
+
+---
+
+#### Lecture 45 — The Importance of Proxy and Reverse Proxies
 
 #### Lecture 45 — The Importance of Proxy and Reverse Proxies
 
