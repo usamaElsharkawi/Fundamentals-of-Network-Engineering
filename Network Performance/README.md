@@ -1944,9 +1944,295 @@ HTTP/3:
 
 #### Lecture 45 — The Importance of Proxy and Reverse Proxies
 
-#### Lecture 45 — The Importance of Proxy and Reverse Proxies
+### Lecture Notes — Discussion
 
-<!-- Discussion notes will be added here -->
+---
+
+### Unit 1: What Is a Proxy?
+
+> **Proxy = A server that makes requests on your behalf.**
+
+You want to go to Google.com. Instead of going yourself, you send your request to a proxy. The proxy goes to Google for you.
+
+```
+You → Proxy → Google
+```
+
+---
+
+### Unit 2: How It Works — Layer by Layer
+
+**Step 1: TCP connection to the proxy (not Google)**
+
+```
+Your machine: "I want to connect to the proxy"
+TCP connection established: You ↔ Proxy
+```
+
+**Step 2: HTTP request (Layer 7)**
+
+```
+You send: GET /google.com
+The proxy reads: "This person wants Google"
+```
+
+**Step 3: Proxy creates a NEW connection to Google**
+
+```
+Proxy → New TCP connection → Google.com
+```
+
+**Step 4: Google sees the proxy, NOT you**
+
+```
+Google sees:
+  Source IP: Proxy's IP (not yours)
+  Source Port: Proxy's port
+
+Google has NO idea who you are.
+```
+
+---
+
+### Unit 3: The Key Rule
+
+> **Proxy: The client knows the server. The server doesn't know the client.**
+
+```
+You (client) → Knows → Proxy → Knows → Google (server)
+Google → Does NOT know → You
+```
+
+**Exception:** Some proxies add headers like `X-Forwarded-For` that reveal the original client IP. But from Layer 4 (TCP), Google only sees the proxy.
+
+---
+
+### Unit 4: Proxy Use Cases
+
+#### Use Case 1: Anonymity
+
+```
+You don't want anyone to know your IP.
+Proxy goes to Google on your behalf.
+Google sees the proxy's IP, not yours.
+```
+
+**Warning:** If the proxy logs your IP, you're not anonymous. You need to trust the proxy.
+
+#### Use Case 2: Caching
+
+```
+Organization proxy:
+  Employee A → Proxy → Google → Cached response
+  Employee B → Proxy → Google → Served from cache (faster!)
+```
+
+**Note:** This is different from a CDN (which is actually a reverse proxy).
+
+#### Use Case 3: Logging & Monitoring (Service Mesh / Sidecar)
+
+```
+Your App ↔ Sidecar Proxy ↔ Service A
+Your App ↔ Sidecar Proxy ↔ Service B
+Your App ↔ Sidecar Proxy ↔ Service C
+```
+
+**Every request goes through the proxy.** The proxy logs:
+- How long each request took
+- Which services were called
+- Errors and latency
+- Tracing information
+
+**This is the basis of service mesh** (Istio, Envoy, Linkerd).
+
+#### Use Case 4: Blocking Websites
+
+```
+Organization proxy inspects all HTTP traffic.
+Employee tries: google.com
+Proxy: "You're not allowed." → Blocks the request.
+```
+
+**The proxy sees everything.** This is why HTTPS/TLS inspection exists.
+
+#### Use Case 5: Debugging (Fiddler)
+
+```
+Fiddler = A proxy installed on your machine.
+Your app → Fiddler (proxy) → Actual destination
+```
+
+**You can see every request your app sends.** Popular monitoring/debugging tool.
+
+---
+
+### Unit 5: What Is a Reverse Proxy?
+
+> **Reverse Proxy = The REVERSE of a proxy.**
+
+```
+Proxy:         Client knows server, server doesn't know client
+Reverse Proxy: Client DOESN'T know true server, server knows client
+```
+
+---
+
+### Unit 6: How Reverse Proxy Works
+
+```
+You → Reverse Proxy → Backend Server
+
+You think: "I'm talking to Google.com"
+Google.com is actually a reverse proxy
+Reverse Proxy talks to the actual backend server
+You never know the real server
+```
+
+```
+Layer 4: You ↔ Reverse Proxy (your destination)
+Layer 7: You ↔ Reverse Proxy (your destination)
+Behind the scenes: Reverse Proxy ↔ Actual Backend Server (unknown to you)
+```
+
+---
+
+### Unit 7: Reverse Proxy Use Cases
+
+#### Use Case 1: Load Balancing
+
+```
+You → google.com (reverse proxy)
+Reverse Proxy → Server 1
+Reverse Proxy → Server 2
+Reverse Proxy → Server 3
+```
+
+> **A load balancer IS a reverse proxy. But not every reverse proxy is a load balancer.**
+
+#### Use Case 2: API Gateway / Microservices Routing
+
+```
+You → API Gateway (reverse proxy)
+
+GET /api/posts → Routes to Post Server
+GET /api/users → Routes to User Server
+GET /api/analytics → Routes to Analytics Server
+```
+
+#### Use Case 3: CDN (Content Delivery Network)
+
+> **A CDN is a glorified reverse proxy.**
+
+```
+You (India) → CDN Server (India) → Content
+CDN may fetch from a server in America if not cached.
+You don't know about the American server.
+```
+
+#### Use Case 4: A/B Testing
+
+```
+You → Reverse Proxy
+Reverse Proxy: "10% of requests → New server, 90% → Old server"
+```
+
+**Warning:** The app must be stateless — otherwise a user's first request goes to the new server and second to the old, breaking their session.
+
+#### Use Case 5: Authentication
+
+```
+Reverse Proxy handles authentication.
+If authenticated → Forward to backend.
+If not → Block.
+```
+
+---
+
+### Unit 8: Proxy + Reverse Proxy Together
+
+Yes, they can be used **at the same time**:
+
+```
+You → Proxy → Reverse Proxy → Backend Server
+
+Layer 4: Your final destination = Proxy
+Layer 7: Your final destination = Proxy (you configured it)
+
+But the Proxy also uses a Reverse Proxy on your behalf.
+
+You don't know what's after the Reverse Proxy either.
+```
+
+---
+
+### Unit 9: Proxy vs VPN
+
+| | Proxy | VPN |
+|---|---|---|
+| **Layer** | Layer 4+ (TCP/UDP/Application) | Layer 3 (IP) |
+| **What it encrypts** | Nothing by default | ALL IP packets |
+| **What it sees** | Needs to know the protocol | Doesn't care — encrypts everything |
+| **Anonymity** | Weaker (proxy may log your IP) | Stronger (IP-level encryption) |
+| **Use case** | HTTP-specific routing, caching | Full network tunnel |
+
+> **Using a proxy for anonymity is NOT a good idea** because proxies often inspect your content. VPNs operate at IP level and don't care what's inside.
+
+---
+
+### Unit 10: Tunnel Mode
+
+```
+Normal proxy mode:
+  Proxy sees your content (can read/modify it)
+
+Tunnel mode:
+  Client asks proxy: "Connect me to google.com"
+  Proxy opens a connection and becomes a DUMP PIPE
+  Proxy CANNOT see the content
+  TLS is end-to-end
+```
+
+**In tunnel mode, the proxy is just a pipe.** It forwards bytes without understanding them.
+
+---
+
+### Unit 11: The Master Definition
+
+> **Proxy:** Client knows the final destination. Server doesn't know the client.
+
+> **Reverse Proxy:** Client doesn't know the true destination. Server knows the client.
+
+```
+┌────────────────────────────────────────────────────┐
+│  PROXY                                              │
+│  Client → Knows → Server                           │
+│  Server → Doesn't know → Client                    │
+│                                                       │
+│  REVERSE PROXY                                      │
+│  Client → Doesn't know → Server                    │
+│  Server → Knows → Client                           │
+└────────────────────────────────────────────────────┘
+```
+
+---
+
+### Key Takeaways — Lecture 45
+
+1. **Proxy** = server makes requests on your behalf; client knows server, server doesn't know client
+2. **Reverse Proxy** = the reverse; client doesn't know true destination
+3. **Proxy use cases:** Anonymity, Caching, Logging, Debugging, Blocking
+4. **Reverse proxy use cases:** Load balancing, API Gateway, CDN, A/B testing, Authentication
+5. **CDN = glorified reverse proxy**
+6. **Load balancer = reverse proxy** (but not every reverse proxy is a load balancer)
+7. **Proxy + Reverse Proxy** can be used together
+8. **Service mesh** (Envoy, Istio, Linkerd) uses proxies as sidecars for logging/monitoring
+9. **Proxy ≠ VPN** — different layers, different purposes
+10. **Tunnel mode** = proxy becomes a blind pipe, can't see content
+11. **Fiddler** = a proxy used for debugging HTTP requests
+
+---
+
+#### Lecture 46 — Load Balancing at Layer 4 vs Layer 7
 
 #### Lecture 46 — Load Balancing at Layer 4 vs Layer 7
 
