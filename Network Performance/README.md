@@ -15,7 +15,7 @@
 - [x] 44. TCP Head of line blocking
 - [ ] 45. The importance of Proxy and Reverse Proxies
 - [x] 46. Load Balancing at Layer 4 vs Layer 7
-- [ ] 47. Network Access Control to Database Servers
+- [x] 47. Network Access Control to Database Servers
 
 ---
 
@@ -2540,8 +2540,307 @@ UNCLEAR → Start with L4, upgrade to L7 when needed
 
 #### Lecture 47 — Network Access Control to Database Servers
 
-#### Lecture 47 — Network Access Control to Database Servers
+### Lecture Notes — Discussion
 
-<!-- Discussion notes will be added here -->
+---
+
+### Unit 1: The Problem — Exposed Databases
+
+> **Exposing your database to everyone = major security disaster.**
+
+```
+Elasticsearch leaked → tens of millions of users
+Pizza Hut database leaked
+MongoDB 700 instances → terabytes of data downloaded
+```
+
+**Why?** Because anyone could connect, guess passwords, and break in.
+
+**The fix:** Control who can connect at the network level.
+
+---
+
+### Unit 2: PostgreSQL's pg_hba.conf — The Gatekeeper
+
+PostgreSQL uses `pg_hba.conf` to control who can connect. It's a list of rules:
+
+```
+# TYPE  DATABASE  USER  ADDRESS          METHOD
+host    all       all   192.168.1.0/24   md5
+host    all       all   127.0.0.1/32     md5
+host    all       all   0.0.0.0/0        md5    ← DANGEROUS!
+```
+
+**Each rule specifies:**
+- What connections are allowed
+- From which IP addresses
+- How they must authenticate
+
+---
+
+### Unit 3: Local Connection (IPC/UNIX Domain) — NOT Loopback
+
+> **Local = Direct process-to-process communication. No TCP, no networking stack.**
+
+```
+App Process ──► PostgreSQL Process (same machine)
+No TCP involved. No IP addresses. Direct memory-level communication.
+```
+
+**Why it's fast:** No network stack, no TCP overhead, no IP routing.
+
+**Default:** PostgreSQL allows this by default.
+
+**Don't confuse with loopback:**
+
+```
+Local (IPC)     → Direct process connection (no TCP)
+Loopback (127.0.0.1) → TCP connection through loopback interface
+```
+
+---
+
+### Unit 4: Loopback (127.0.0.1/32)
+
+> **Only 127.0.0.1 can connect. Exactly that IP. Nothing else.**
+
+```
+host  all  all  127.0.0.1/32  md5
+```
+
+**What /32 means:**
+
+```
+/32 = 32-bit subnet mask = 255.255.255.255
+Every bit must match exactly.
+127.0.0.1/32 = ONLY 127.0.0.1
+127.0.0.2/32 = FAILS (doesn't match)
+```
+
+**Use case:** Database on same machine, accessed via TCP loopback.
+
+---
+
+### Unit 5: IPv6 Loopback (::1/128)
+
+Same concept for IPv6:
+
+```
+::1/128 = ONLY ::1 (IPv6 loopback)
+```
+
+---
+
+### Unit 6: localhost (Covers Both)
+
+> **localhost = resolves to 127.0.0.1 (IPv4) OR ::1 (IPv6)**
+
+```
+host  all  all  localhost  md5
+```
+
+**Safe choice** — covers both IP versions without specifying each.
+
+---
+
+### Unit 7: Specific IP Address
+
+> **Allow only ONE specific machine to connect.**
+
+```
+host  all  all  192.168.1.50/32  md5
+```
+
+**Use case:** Development — only your dev machine can connect.
+
+**Problem:** IP might change (DHCP, reboot, corporate network).
+
+---
+
+### Unit 8: Subnet — Allow a Range
+
+> **Allow all machines in a subnet to connect.**
+
+```
+host  all  all  192.168.1.0/24  md5
+```
+
+**What /24 means:**
+
+```
+192.168.1.0/24 = 192.168.1.0 through 192.168.1.255
+All 254 addresses can connect.
+```
+
+**Use case:** Department network — all engineering machines can connect.
+
+**How to find your subnet:**
+
+```bash
+# Linux/Mac
+ifconfig
+# or
+ip addr
+
+# Look for:
+# IP Address: 192.168.1.50
+# Subnet Mask: 255.255.255.0 → /24
+```
+
+---
+
+### Unit 9: /32 — Exact Match
+
+> **/32 = match ALL bits = one specific IP address.**
+
+```
+192.168.1.50/32 = ONLY 192.168.1.50
+192.168.1.51/32 = FAILS
+```
+
+---
+
+### Unit 10: 0.0.0.0/0 — Allow Everyone (BAD!)
+
+> **0.0.0.0/0 = ALL IPv4 addresses = EVERYONE can connect.**
+
+```
+host  all  all  0.0.0.0/0  md5    ← NEVER DO THIS IN PRODUCTION
+```
+
+**The instructor's rule:**
+
+> **"Never, never, never use all. I always say that in all my examples."**
+
+**Why it's bad:**
+- Anyone on the internet can connect
+- Password guessing attacks
+- Database leaks happen this way
+
+---
+
+### Unit 11: Reject Specific IPs
+
+> **Allow everyone EXCEPT certain IPs.**
+
+```
+host  all  all  10.0.0.5/32  reject
+host  all  all  0.0.0.0/0    md5
+```
+
+**Use case:** Block a specific compromised machine while allowing others.
+
+---
+
+### Unit 12: Listen Addresses — What the Server Listens On
+
+> **Separate from who can connect — this is what IPs the server binds to.**
+
+PostgreSQL config:
+
+```ini
+# Default: listens on localhost only
+listen_addresses = 'localhost'
+
+# Listen on all IPv4
+listen_addresses = '*'
+
+# Listen on specific IPs
+listen_addresses = '192.168.1.20, 10.0.0.1'
+```
+
+**From PostgreSQL docs:**
+
+> "The value takes the form of a comma-separated list of hostnames and/or IP addresses. The special entry `*` corresponds to all available interfaces."
+
+---
+
+### Unit 13: Defense in Depth — TWO Controls
+
+> **Use BOTH listen addresses AND connection rules.**
+
+```
+┌────────────────────────────────────────────────────┐
+│  Layer 1: Listen Addresses                        │
+│  "What IPs I listen on"                           │
+│  listen_addresses = '192.168.1.20'            │
+│                                                       │
+│  Layer 2: pg_hba.conf                             │
+│  "Who can connect"                                │
+│  host all all 192.168.1.0/24 md5                │
+│                                                       │
+│  Even if you accidentally listen on all IPs,    │
+│  only your subnet can actually connect.           │
+└────────────────────────────────────────────────────┘
+```
+
+**The instructor's key insight:**
+
+> "Even if you listen on a public IP accidentally, you can still control who can connect."
+
+---
+
+### Unit 14: Step 1 Protection — Block Before Password Guessing
+
+> **Block at the connection level BEFORE authentication.**
+
+```
+Hacker finds your public IP:
+  Step 1: TCP connection → BLOCKED (not allowed by pg_hba.conf)
+  Step 2: Never reaches password guessing
+  DONE. Hacker is out.
+```
+
+**vs. without protection:**
+
+```
+Hacker finds your public IP:
+  Step 1: TCP connection → ACCEPTED
+  Step 2: Password guessing → "admin/admin" → FAIL
+  Step 3: Password guessing → "postgres/postgres" → SUCCESS 😱
+  Step 4: Full database access → GAME OVER
+```
+
+**The instructor's words:**
+
+> "Step 1 takes a long time. Step 1, you don't want the hacker to reach step one. Block it at the start."
+
+---
+
+### Unit 15: Production Checklist
+
+```
+✅ 1. Never use 0.0.0.0/0 in pg_hba.conf
+✅ 2. Use specific IPs or subnets
+✅ 3. Use localhost/127.0.0.1 for same-machine access
+✅ 4. Set listen_addresses to specific IPs (not *)
+✅ 5. Use /32 for single-machine access
+✅ 6. Use /24 for department/subnet access
+✅ 7. Use reject for specific blocked IPs
+✅ 8. Use BOTH listen addresses AND pg_hba.conf
+✅ 9. Never leave default configurations in production
+✅ 10. Test and verify who can actually connect
+```
+
+---
+
+### Key Takeaways — Lecture 47
+
+1. **Exposed databases = #1 cause of data leaks**
+2. **pg_hba.conf** = PostgreSQL's connection gatekeeper
+3. **Local (IPC)** ≠ Loopback — direct process connection, no TCP
+4. **/32** = exact single IP match
+5. **/24** = subnet range (254 addresses)
+6. **0.0.0.0/0** = everyone (NEVER in production)
+7. **Listen addresses** = what IPs the server binds to (separate from who can connect)
+8. **Defense in depth** = use BOTH listen addresses AND pg_hba.conf
+9. **Block at Step 1** = prevent connection before password guessing
+10. **Default configs are for development, not production**
+
+---
+
+### The Master Rule
+
+> **"Step 1, you don't want the hacker to reach step one. Block it at the start."**
 
 </details>
