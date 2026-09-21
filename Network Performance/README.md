@@ -14,7 +14,7 @@
 - [ ] 43. Listening Server
 - [x] 44. TCP Head of line blocking
 - [ ] 45. The importance of Proxy and Reverse Proxies
-- [ ] 46. Load Balancing at Layer 4 vs Layer 7
+- [x] 46. Load Balancing at Layer 4 vs Layer 7
 - [ ] 47. Network Access Control to Database Servers
 
 ---
@@ -2234,9 +2234,311 @@ Tunnel mode:
 
 #### Lecture 46 — Load Balancing at Layer 4 vs Layer 7
 
-#### Lecture 46 — Load Balancing at Layer 4 vs Layer 7
+### Lecture Notes — Discussion
 
-<!-- Discussion notes will be added here -->
+---
+
+### Unit 1: Recap — Load Balancer = Reverse Proxy + Balancing Logic
+
+> **Load Balancer = Reverse Proxy that has logic to balance requests between multiple backends.**
+
+```
+Every load balancer IS a reverse proxy.
+Not every reverse proxy IS a load balancer.
+```
+
+---
+
+### Unit 2: Layer 4 Load Balancing — How It Works
+
+**Layer 4 only deals with:** IP addresses, ports, TCP segments.
+
+**It does NOT read data.** It's blind to content.
+
+#### Connection Warming
+
+```
+Layer 4 LB starts up:
+  → Opens multiple TCP connections to each backend
+  → Keeps them "warm" (ready to go)
+  → No handshake delay when client connects
+```
+
+#### Mode 1: Direct Forwarding
+
+```
+Client connects to LB.
+LB picks ONE backend.
+ALL segments from that client → that ONE backend connection.
+```
+
+**The contract:**
+
+```
+One client connection = One backend connection.
+Always. Forever.
+```
+
+**Why?** TCP is stateful. If you send segment A on connection 1, then segment B on connection 2, sequences get out of sync. Data gets corrupted.
+
+#### Mode 2: NAT Mode
+
+```
+Client → LB (gateway)
+LB rewrites destination IP:Port → Backend
+Backend sees: Source = LB (not client)
+Backend responds → LB → Client
+```
+
+**Client is unaware** — thinks it's talking to LB.
+
+#### What LB Sees
+
+```
+LB receives segments.
+LB does NOT read them.
+LB does NOT know if it's HTTP, gRPC, WebSocket, MySQL, PostgreSQL.
+LB sees: "Here's a segment. Rewrite destination. Forward."
+```
+
+**Protocol agnostic** — the beauty of Layer 4.
+
+---
+
+### Unit 3: Layer 4 — When New Connection Arrives
+
+```
+Client opens NEW connection.
+LB triggers load balancing logic.
+LB picks backend based on algorithm (round robin, least connections, etc.).
+New TCP connection established.
+```
+
+**But:** Once chosen, it's STUCK. All segments on that connection go to the same backend.
+
+---
+
+### Unit 4: Layer 4 — Pros
+
+| Pro | Explanation |
+|---|---|
+| **Simple** | Doesn't read data — just IP, ports, segments |
+| **Efficient** | No data buffering, no reading, no decrypting |
+| **Secure** | No need to decrypt — almost end-to-end encrypted |
+| **Protocol agnostic** | Works with ANY protocol |
+| **Fast** | No delay from reading/buffering |
+
+---
+
+### Unit 5: Layer 4 — Cons
+
+#### No Smart Routing
+
+```
+Can't say: "Send /api/posts to Post Server"
+Because LB doesn't know what /api/posts means.
+```
+
+#### No Caching
+
+```
+LB can't cache responses.
+It doesn't know what data represents.
+```
+
+#### Private Connections (Big Disadvantage)
+
+```
+Each client connection = ONE dedicated backend connection.
+10,000 clients → 10,000 backend connections.
+Backend connections are LIMITED.
+You can DEPLETE backend connections.
+```
+
+**Layer 7 doesn't have this** — multiplexes many client requests over fewer backend connections.
+
+#### No Protocol-Specific Logic
+
+```
+Can't do: Authentication, Rate limiting, Header inspection, Path-based routing
+```
+
+#### Downgrade Risk
+
+```
+If upgrading HTTP → WebSockets or TLS:
+  L7 LB → L4 LB (to support protocol)
+  ALL L7 logic LOST: auth, routing, caching, headers
+  Everything becomes blind forwarding
+```
+
+---
+
+### Unit 6: Layer 7 Load Balancing — How It Works
+
+**Layer 7 reads the actual content.** Understands HTTP, gRPC, etc.
+
+#### Reading and Buffering
+
+```
+Client sends HTTP request (1-100+ segments).
+LB reads ALL segments.
+LB buffers them.
+LB understands: "This is one complete HTTP request."
+LB forwards the request to a backend.
+```
+
+```
+Segments 1, 2, 3 → [LB reads & buffers] → Complete Request 1 → Backend A
+Segments 4, 5, 6 → [LB reads & buffers] → Complete Request 2 → Backend B (different!)
+```
+
+**Key difference from L4:** Requests are independent. Request 2 can go to a DIFFERENT backend even on the same client connection.
+
+#### TLS Termination
+
+```
+Client → HTTPS → LB
+LB decrypts TLS.
+LB reads HTTP request.
+LB forwards to backend (can re-encrypt or plain).
+```
+
+**LB holds the certificate.** Called "TLS Terminator."
+
+> Some organizations don't like this — private key lives on the LB.
+
+---
+
+### Unit 7: Layer 7 — Smart Routing
+
+```
+GET /api/posts → Post Server (read-heavy DB)
+GET /api/comments → Comment Server (write-heavy DB)
+POST /api/analyze → Analytics Server (compute-heavy)
+GET /api/pictures → CDN-backed Server
+```
+
+---
+
+### Unit 8: Layer 7 — Pros
+
+| Pro | Explanation |
+|---|---|
+| **Smart load balancing** | Pick backend based on content, path, headers |
+| **Caching** | Can cache responses (knows what they are) |
+| **Authentication** | Can check tokens, cookies, headers |
+| **API Gateway** | Rate limiting, auth, routing |
+| **Better connection reuse** | Many client requests over fewer backend connections |
+| **Protocol-specific** | Understands HTTP, gRPC, GraphQL, etc. |
+
+---
+
+### Unit 9: Layer 7 — Cons
+
+#### Expensive
+
+```
+Reading → Cost
+Buffering → Cost
+Decrypting TLS → Cost
+Understanding protocol → Cost
+```
+
+#### Bottleneck Risk
+
+```
+Many simultaneous requests:
+  Must read → Buffer → Decrypt → Understand → Forward
+  Backends wait for processed requests
+  LB can become bottleneck
+```
+
+#### Needs Protocol Understanding
+
+```
+If backend uses PostgreSQL protocol:
+  LB MUST understand PostgreSQL protocol.
+  If not → Can't do L7 → Must downgrade to L4.
+```
+
+#### Certificate Management
+
+```
+Private key lives on LB.
+If LB compromised → All TLS traffic exposed.
+```
+
+---
+
+### Unit 10: HTTP Smuggling
+
+> **HTTP Smuggling** = Attack where LB and backend disagree on request boundaries.
+
+```
+LB thinks: Request 1 ends here, Request 2 starts here.
+Backend thinks: Request 1 ends HERE, Request 2 starts HERE (different!).
+```
+
+**Result:** Requests get mixed up. Security vulnerability.
+
+**Cause:** LB and backend don't agree on request boundaries (e.g., different handling of `Content-Length` vs `Transfer-Encoding`).
+
+---
+
+### Unit 11: Side-by-Side Comparison
+
+| | Layer 4 | Layer 7 |
+|---|---|---|
+| **Reads data?** | No | Yes |
+| **Understands protocol?** | No | Yes |
+| **Smart routing?** | No (IP/port only) | Yes (path, headers, content) |
+| **Caching?** | No | Yes |
+| **Authentication?** | No | Yes |
+| **TLS termination?** | No | Yes |
+| **Connection usage** | 1 client = 1 backend (wasteful) | Many clients = fewer backends (efficient) |
+| **Performance** | Fast (no overhead) | Slower (reading, buffering, decrypting) |
+| **Protocol support** | Any protocol | Must understand the protocol |
+| **Security** | Higher (no decryption) | Lower (must decrypt) |
+| **Bottleneck risk** | Low | Higher |
+| **Best for** | Raw throughput, any protocol | Smart routing, HTTP APIs, microservices |
+
+---
+
+### Unit 12: Decision Framework
+
+```
+Do you need content-aware decisions?
+
+YES (path routing, auth, caching, API GW)
+   → Layer 7 Load Balancer
+
+NO (just distribute traffic, any protocol)
+   → Layer 4 Load Balancer
+
+UNCLEAR → Start with L4, upgrade to L7 when needed
+```
+
+---
+
+### Key Takeaways — Lecture 46
+
+1. **Load Balancer = Reverse Proxy + balancing logic**
+2. **L4 LB** = blind forwarding, IP/ports only, protocol agnostic, fast, simple
+3. **L4 mode 1** = direct forwarding, one client = one backend connection (sticky)
+4. **L4 mode 2** = NAT mode, rewrites destination IP
+5. **L4 cons** = no smart routing, no caching, private connections deplete backends
+6. **L7 LB** = reads and buffers requests, understands HTTP/content
+7. **L7 pros** = smart routing, caching, auth, API gateway, better connection reuse
+8. **L7 cons** = expensive, bottleneck risk, needs protocol understanding, TLS termination
+9. **TLS Termination** = L7 decrypts traffic, holds certificate ("TLS Terminator")
+10. **HTTP Smuggling** = risk when LB and backend disagree on request boundaries
+11. **Downgrade risk** = L7 → L4 when supporting new protocols loses all L7 logic
+12. **No right or wrong** = each has its use case
+
+---
+
+#### Lecture 47 — Network Access Control to Database Servers
 
 #### Lecture 47 — Network Access Control to Database Servers
 
