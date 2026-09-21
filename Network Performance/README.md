@@ -1554,11 +1554,129 @@ Best Combined With:
 
 #### Lecture 43 — Listening Server
 
+### Lecture Notes — Discussion (In Progress)
+
 ---
 
-#### Lecture 43 — Listening Server
+### What We Covered So Far
 
-<!-- Discussion notes will be added here -->
+---
+
+### 1. Server Socket = (IP Address, Port Number)
+
+**To create a server, you listen on a specific IP and Port:**
+
+```
+Server Socket = (IP Address, Port Number)
+```
+
+**Why both?**
+
+```
+IP Address = Which network interface to listen on
+Port Number = Which application on that machine
+```
+
+**Examples:**
+
+```
+192.168.1.20:8080 -> Listen on Ethernet interface, port 8080
+0.0.0.0:8080      -> Listen on ALL interfaces, port 8080
+127.0.0.1:8080    -> Listen on localhost ONLY, port 8080
+```
+
+---
+
+### 2. Multiple IP Addresses on One Machine
+
+A single machine can have **many IP addresses** -- each network interface gets one:
+
+```
+Your Server
+
+ Ethernet          Wi-Fi             Docker
+ 192.168.1.20    192.168.1.30    172.17.0.2
+
+ Loopback
+ 127.0.0.1
+```
+
+| IP | Interface | Who can reach it |
+|---|---|---|
+| `192.168.1.20` | Ethernet | Local network |
+| `192.168.1.30` | Wi-Fi | Local network (different interface) |
+| `172.17.0.2` | Docker | Docker containers only |
+| `127.0.0.1` | Loopback | Only this machine |
+
+---
+
+### 3. Production vs Development Listening
+
+**Production = Live, real users, real traffic.**
+
+| Environment | Listen IP | Who can reach it |
+|---|---|---|
+| **Development** | `127.0.0.1` | Only this machine |
+| **Production** | `0.0.0.0` | Everyone (all interfaces) |
+| **Staging** | Specific IP | Internal network only |
+
+---
+
+### 4. One (IP, Port) = One Process
+
+> **No two processes can listen on the same IP:Port.**
+
+```
+P1 -> Listen(127.0.0.1, 8080) OK
+P2 -> Listen(127.0.0.1, 8080) ERROR: Address already in use
+```
+
+**The IP in Listen(IP, Port) is the Destination IP** -- the address clients connect TO.
+
+**The server's IP is always the same** -- it's the server's identity:
+
+```
+Incoming packets:  Server's IP = DESTINATION
+Outgoing packets:  Server's IP = SOURCE
+
+Same IP, different direction.
+```
+
+---
+
+### 5. SO_REUSEPORT -- The Exception
+
+> **SO_REUSEPORT = Allow multiple processes to listen on the same IP:Port.**
+
+```c
+int opt = 1;
+setsockopt(socket, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt));
+```
+
+**Without it:** One process owns the port.
+**With it:** Multiple processes can ALL own the port.
+
+**SO_REUSEPORT vs SO_REUSEADDR:**
+
+| Option | Purpose |
+|---|---|
+| **SO_REUSEADDR** | Allow binding to a port in TIME_WAIT |
+| **SO_REUSEPORT** | Allow multiple processes to listen on same port |
+
+---
+
+### Remaining: Node.js Listen Specifics
+
+The instructor will cover Node.js-specific listen behavior:
+
+- `server.listen(port, host)` API
+- How Node.js handles the IP:Port binding
+- Error handling for conflicts
+- Practical Node.js server setup
+
+---
+
+#### Lecture 44 -- TCP Head of Line Blocking
 
 #### Lecture 44 — TCP Head of Line Blocking
 
