@@ -1082,114 +1082,6 @@ Total: ~2000ms = 2 seconds
 
 ---
 
-### Unit 9: TCP Fast Open — Preview (Lecture 42)
-
-The solution to the 1 RTT handshake cost:
-
-```
-Normal: SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data)
-TCP Fast Open: SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
-```
-
-TCP Fast Open lets you send data **in the SYN packet itself**. The server has been "pre-warmed" — it remembers your previous connection and trusts the data in the SYN.
-
-**But:** Requires a previous connection to establish the TFO cookie. First connection still costs 1 RTT.
-
----
-
-### Unit 10: Practical Impact for Full-Stack Engineers
-
-| Scenario | What you experience | What to do |
-|---|---|---|
-| **First API call is slow** | TCP + TLS handshake overhead | Connection pooling, CDN |
-| **Many short API calls** | Repeated handshake costs | Keep-Alive, HTTP/2, connection pool |
-| **Database connection slow** | TCP handshake per query | PgBouncer, ProxySQL (connection pooler) |
-| **Server has many connections** | Memory exhaustion (16KB each) | `max_connections` tuning, connection pool |
-| **Port exhaustion** | "Too many open files" / TIME_WAIT | `SO_REUSEADDR`, connection pool, ephemeral port range increase |
-| **Mobile app on slow network** | RTT x 3-4 before content | TFO, CDN, TLS 1.3, aggressive caching |
-
----
-
-### Key Takeaways — Lecture 41
-
-1. **Connection cost = everything before your data flows** — handshake, TLS, setup
-2. **TCP handshake = 1 RTT** before any data
-3. **TLS 1.2 = 2 extra RTT**, TLS 1.3 = 1 extra RTT
-4. **Total first request = 3-4 RTT** (150-200ms at 50ms RTT)
-5. **Memory cost** = ~4KB-64KB per connection -> limits max connections
-6. **File descriptor limit** = each connection uses one fd
-7. **TIME_WAIT** = ports locked for 60-120 seconds after connection closes
-8. **Connection pooling** = the most impactful optimization for repeated connections
-9. **Eager loading** = create all connections at startup (fast first request, slow startup)
-10. **Lazy loading** = create on demand (instant startup, slow first request)
-11. **TCP Fast Open** = sends data in SYN -> saves 1 RTT (covered in Lecture 42)
-10. **HTTP/2, HTTP/3** = designed specifically to reduce connection overhead
-
----
-
-#### Lecture 42 — TCP Fast Open
-
-### Lecture Notes — Discussion
-
----
-
-### TCP Fast Open — In Isolation
-
-**TCP Fast Open (TFO) = Send data in the SYN packet, skipping one RTT of the handshake.**
-
-Normal TCP:
-```
-SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data flows)
-```
-
-TCP Fast Open:
-```
-SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
-```
-
-**How it works:**
-
-1. Client has connected before — server gave it a **TFO cookie**
-2. Next connection: client puts data in the SYN packet
-3. Server receives SYN + data, processes it immediately
-4. No need to wait for ACK before sending data
-
-**The catch:** Requires a previous connection to get the cookie. First connection still costs 1 RTT.
-
----
-
-### TFO Cookie Mechanism
-
-```
-First connection (no TFO):
-  Client -> SYN (no data) -> Server
-  Server -> SYN-ACK + TFO cookie -> Client
-  Client stores cookie for future use
-
-Second connection (with TFO):
-  Client -> SYN + DATA (with cookie) -> Server
-  Server validates cookie -> accepts data immediately
-  Server -> SYN-ACK -> Client
-  Total: 1 RTT (saved the ACK wait)
-```
-
----
-
-### Why TFO Matters
-
-```
-Without TFO:
-  Every new connection = 1 RTT wasted on handshake
-  1000 connections = 1000 RTTs of pure overhead
-
-With TFO:
-  First connection = 1 RTT (normal)
-  All subsequent = 0 extra RTT (data in SYN)
-  1000 connections = 1 RTT total overhead
-```
-
----
-
 ### Connection Pooling — In Isolation
 
 **Connection Pooling = Pre-establishing a set of TCP connections and reusing them instead of creating new ones for each request.**
@@ -1317,6 +1209,114 @@ Lazy Loading = WHEN to create (on demand)
 
 ---
 
+### Unit 9: TCP Fast Open — Preview (Lecture 42)
+
+The solution to the 1 RTT handshake cost:
+
+```
+Normal: SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data)
+TCP Fast Open: SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
+```
+
+TCP Fast Open lets you send data **in the SYN packet itself**. The server has been "pre-warmed" — it remembers your previous connection and trusts the data in the SYN.
+
+**But:** Requires a previous connection to establish the TFO cookie. First connection still costs 1 RTT.
+
+---
+
+### Unit 10: Practical Impact for Full-Stack Engineers
+
+| Scenario | What you experience | What to do |
+|---|---|---|
+| **First API call is slow** | TCP + TLS handshake overhead | Connection pooling, CDN |
+| **Many short API calls** | Repeated handshake costs | Keep-Alive, HTTP/2, connection pool |
+| **Database connection slow** | TCP handshake per query | PgBouncer, ProxySQL (connection pooler) |
+| **Server has many connections** | Memory exhaustion (16KB each) | `max_connections` tuning, connection pool |
+| **Port exhaustion** | "Too many open files" / TIME_WAIT | `SO_REUSEADDR`, connection pool, ephemeral port range increase |
+| **Mobile app on slow network** | RTT x 3-4 before content | TFO, CDN, TLS 1.3, aggressive caching |
+
+---
+
+### Key Takeaways — Lecture 41
+
+1. **Connection cost = everything before your data flows** — handshake, TLS, setup
+2. **TCP handshake = 1 RTT** before any data
+3. **TLS 1.2 = 2 extra RTT**, TLS 1.3 = 1 extra RTT
+4. **Total first request = 3-4 RTT** (150-200ms at 50ms RTT)
+5. **Memory cost** = ~4KB-64KB per connection -> limits max connections
+6. **File descriptor limit** = each connection uses one fd
+7. **TIME_WAIT** = ports locked for 60-120 seconds after connection closes
+8. **Connection pooling** = the most impactful optimization for repeated connections
+9. **Eager loading** = create all connections at startup (fast first request, slow startup)
+10. **Lazy loading** = create on demand (instant startup, slow first request)
+11. **TCP Fast Open** = sends data in SYN -> saves 1 RTT (covered in Lecture 42)
+12. **HTTP/2, HTTP/3** = designed specifically to reduce connection overhead
+
+---
+
+#### Lecture 42 — TCP Fast Open
+
+### Lecture Notes — Discussion
+
+---
+
+### TCP Fast Open — In Isolation
+
+**TCP Fast Open (TFO) = Send data in the SYN packet, skipping one RTT of the handshake.**
+
+Normal TCP:
+```
+SYN -> SYN-ACK -> ACK -> DATA (3 RTT before data flows)
+```
+
+TCP Fast Open:
+```
+SYN + DATA -> SYN-ACK -> ACK (1 RTT saved!)
+```
+
+**How it works:**
+
+1. Client has connected before — server gave it a **TFO cookie**
+2. Next connection: client puts data in the SYN packet
+3. Server receives SYN + data, processes it immediately
+4. No need to wait for ACK before sending data
+
+**The catch:** Requires a previous connection to get the cookie. First connection still costs 1 RTT.
+
+---
+
+### TFO Cookie Mechanism
+
+```
+First connection (no TFO):
+  Client -> SYN (no data) -> Server
+  Server -> SYN-ACK + TFO cookie -> Client
+  Client stores cookie for future use
+
+Second connection (with TFO):
+  Client -> SYN + DATA (with cookie) -> Server
+  Server validates cookie -> accepts data immediately
+  Server -> SYN-ACK -> Client
+  Total: 1 RTT (saved the ACK wait)
+```
+
+---
+
+### Why TFO Matters
+
+```
+Without TFO:
+  Every new connection = 1 RTT wasted on handshake
+  1000 connections = 1000 RTTs of pure overhead
+
+With TFO:
+  First connection = 1 RTT (normal)
+  All subsequent = 0 extra RTT (data in SYN)
+  1000 connections = 1 RTT total overhead
+```
+
+---
+
 ### Key Takeaways — Lecture 42
 
 1. **TCP Fast Open** = send data in SYN packet, saves 1 RTT
@@ -1325,8 +1325,6 @@ Lazy Loading = WHEN to create (on demand)
 4. **Not a replacement** for connection pooling — complementary optimization
 
 ---
-
-#### Lecture 43 — Listening Server
 
 #### Lecture 43 — Listening Server
 
